@@ -1,0 +1,40 @@
+# Claude Code local settings
+.claude/
+.omc/
+
+# Build directories
+builds/
+build/
+build_*/
+npm_emulator/build/
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dll
+*.dylib
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.DS_Store
+
+# Models (large files)
+models/*.gguf
+
+# Large binary files
+*.lib
+*.pdb
+*.bin.bin
+
+# Temporary files
+*.tmp
+*.log
+TAGS_Log.txt
+
+# pdf files in NEM docs
+spec/*.pdf
+
+tools/interpreter/paula

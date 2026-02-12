@@ -1,0 +1,36 @@
+{
+  "name": "nem-language",
+  "displayName": "NEM - NeuPro-M Execution Model",
+  "description": "Syntax highlighting for the NEM (NeuPro-M Execution Model) language",
+  "version": "0.1.0",
+  "publisher": "lhamacpp-npm",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "nem",
+        "aliases": [
+          "NEM",
+          "NeuPro-M Execution Model"
+        ],
+        "extensions": [
+          ".nem",
+          ".cfg"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nem",
+        "scopeName": "source.nem",
+        "path": "./syntaxes/nem.tmLanguage.json"
+      }
+    ]
+  }
+}

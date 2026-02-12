@@ -1,0 +1,185 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "NEM",
+  "scopeName": "source.nem",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#decorator" },
+    { "include": "#task-transfer-store" },
+    { "include": "#compute-opcode" },
+    { "include": "#keyword-control" },
+    { "include": "#keyword-declaration" },
+    { "include": "#keyword-task" },
+    { "include": "#keyword-config" },
+    { "include": "#keyword-typefamily" },
+    { "include": "#element-type" },
+    { "include": "#memory-level" },
+    { "include": "#execution-unit" },
+    { "include": "#attribute-name" },
+    { "include": "#number" },
+    { "include": "#operator" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.nem",
+      "match": "#.*$"
+    },
+    "string": {
+      "name": "string.quoted.double.nem",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.nem",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "decorator": {
+      "patterns": [
+        {
+          "comment": "Decorator with arguments: @resource(NMU[0]), @max_in_flight(4)",
+          "name": "meta.decorator.nem",
+          "begin": "(@[a-zA-Z_][a-zA-Z0-9_]*)(\\()",
+          "beginCaptures": {
+            "1": { "name": "entity.name.tag.decorator.nem" },
+            "2": { "name": "punctuation.paren.open.nem" }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": { "name": "punctuation.paren.close.nem" }
+          },
+          "patterns": [
+            { "include": "#execution-unit" },
+            { "include": "#number" },
+            { "include": "#punctuation" }
+          ]
+        },
+        {
+          "comment": "Decorator without arguments: @materialized, @readonly",
+          "name": "entity.name.tag.decorator.nem",
+          "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+        }
+      ]
+    },
+    "task-transfer-store": {
+      "comment": "Compound task keywords: transfer.async, store.sync, etc.",
+      "name": "keyword.other.task.nem",
+      "match": "\\b(transfer|store)\\.(async|sync)\\b"
+    },
+    "compute-opcode": {
+      "comment": "Compute opcodes followed by .async or .sync",
+      "match": "\\b(gemm|matmul|conv2d|conv1d|conv3d|depthwise_conv2d|relu|leaky_relu|sigmoid|tanh|exp|log|sqrt|abs|neg|add|sub|mul|div|min|max|pow|clamp|maxpool|avgpool|transpose|reshape|slice|concat|split|pad|gather|reduce_sum|reduce_max|reduce_min|argmax|argmin|cast|quantize|dequantize|compute)\\.(async|sync)\\b",
+      "captures": {
+        "1": { "name": "entity.name.function.opcode.nem" },
+        "2": { "name": "keyword.other.async-sync.nem" }
+      }
+    },
+    "keyword-control": {
+      "name": "keyword.control.nem",
+      "match": "\\b(program|loop|endloop|in|include|wait)\\b"
+    },
+    "keyword-declaration": {
+      "name": "keyword.declaration.nem",
+      "match": "\\b(buffer|region|let|device)\\b"
+    },
+    "keyword-task": {
+      "comment": "IN/OUT operand markers (uppercase only)",
+      "name": "keyword.other.task.nem",
+      "match": "\\b(IN|OUT)\\b"
+    },
+    "keyword-config": {
+      "patterns": [
+        {
+          "comment": "Compound config keywords: opcode.mandatory, opcode.extended",
+          "name": "keyword.other.config.nem",
+          "match": "\\bopcode\\.(mandatory|extended)\\b"
+        },
+        {
+          "name": "keyword.other.config.nem",
+          "match": "\\b(topology|per_engine|num_engines|spec_version|baseline|extends)\\b"
+        }
+      ]
+    },
+    "keyword-typefamily": {
+      "name": "keyword.other.typefamily.nem",
+      "match": "\\b(type_family|variants|conformance|MUST|MAY|absent|required)\\b"
+    },
+    "element-type": {
+      "name": "storage.type.nem",
+      "match": "\\b(i4|i8|i16|i32|u8|u16|u32|f16|bf16|f32)\\b"
+    },
+    "memory-level": {
+      "name": "constant.language.memory.nem",
+      "match": "\\b(DDR|L2|L1)\\b"
+    },
+    "execution-unit": {
+      "name": "constant.language.unit.nem",
+      "match": "\\b(NMU|CSTL|DMA)\\b"
+    },
+    "attribute-name": {
+      "comment": "Named attributes: key= pattern",
+      "match": "\\b(dst|src|deps|elem|shape|layout|strides|quant|accum_type|pads|dilations|groups|kernel_shape|alpha|perm|target_shape|axis|keepdims|mode|constant_value|split_sizes|min_val|max_val|starts|ends|axes|steps|size|align|op|attrs)\\s*(=)",
+      "captures": {
+        "1": { "name": "variable.parameter.nem" },
+        "2": { "name": "keyword.operator.assignment.nem" }
+      }
+    },
+    "number": {
+      "name": "constant.numeric.nem",
+      "match": "\\b[0-9]+\\b"
+    },
+    "operator": {
+      "patterns": [
+        {
+          "comment": "Range operator",
+          "name": "keyword.operator.range.nem",
+          "match": "\\.\\."
+        },
+        {
+          "comment": "Arithmetic and mod",
+          "name": "keyword.operator.nem",
+          "match": "\\bmod\\b|[+\\-*/]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.paren.open.nem",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.paren.close.nem",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.bracket.open.nem",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.bracket.close.nem",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.brace.open.nem",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.brace.close.nem",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.colon.nem",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.comma.nem",
+          "match": ","
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+# CODEOWNERS — defines ownership for review assignment
+#
+# Tool agents own their tool directories.
+# Integration agent owns contracts, spec, libs, and shared infrastructure.
+
+# Integration-owned (require integration agent review)
+/docs/contracts/         @integration
+/libs/                   @integration
+/spec/                   @integration
+/tests/conformance/      @integration
+
+# Tool-owned
+/tools/interpreter/      @interpreter-agent
+/tools/compiler/         @compiler-agent
+/tools/binder/           @binder-agent
+/tools/simulator/        @simulator-agent

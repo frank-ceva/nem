@@ -1,0 +1,69 @@
+# Conv2D + ReLU pipeline with explicit tiling and async tasks
+# Demonstrates: buffers, regions, loops, transfers, compute, decorators
+
+device "npm_lite.cfg"
+
+program conv2d_relu:
+
+buffer X_L2 : L2 (size=65536, align=64)
+buffer W_L2 : L2 (size=16384, align=64)
+buffer B_L2 : L2 (size=256, align=64)
+buffer Y_L2 : L2 (size=65536, align=64)
+
+buffer X_L1 : L1 (size=2*4096, align=64)
+buffer W_L1 : L1 (size=4096, align=64)
+buffer Y_L1 : L1 (size=2*4096, align=64)
+
+loop i in [0..15] @max_in_flight(2):
+
+  let X_tile_i = region(X_L2, i * 4096, 4096)
+                 elem=i8, shape=[1,8,8,64], layout=NHWC
+
+  let Y_tile_i = region(Y_L2, i * 4096, 4096)
+                 elem=i8, shape=[1,8,8,64], layout=NHWC
+                 @materialized
+
+  let X_pp_i = region(X_L1, (i mod 2)*4096, 4096)
+               elem=i8, shape=[1,8,8,64], layout=NHWC
+
+  let Y_pp_i = region(Y_L1, (i mod 2)*4096, 4096)
+               elem=i8, shape=[1,8,8,64], layout=NHWC
+               @materialized
+
+  let W_l1 = region(W_L1, 0, 4096)
+             elem=i8, shape=[3,3,64,64], layout=HWIO
+
+  let B_l2 = region(B_L2, 0, 256)
+             elem=i32, shape=[64], layout=C
+             @readonly
+
+  # Transfer input tile and weights to L1
+  tX = transfer.async(dst=X_pp_i, src=X_tile_i)
+  tW = transfer.async(
+         dst=W_l1,
+         src=region(W_L2, 0, 4096)
+             elem=i8, shape=[3,3,64,64], layout=HWIO
+       )
+  wait(tX, tW)
+
+  # Run convolution on NMU
+  tC = conv2d.async
+          IN  X_pp_i, W_l1, B_l2
+          OUT Y_pp_i
+          deps=[tX, tW]
+          pads=[1,1,1,1]
+          strides=[1,1]
+          dilations=[1,1]
+          groups=1
+          accum_type=i32
+
+  # Run ReLU post-op
+  tR = relu.async
+          IN  Y_pp_i
+          OUT Y_pp_i @materialized
+          deps=[tC]
+
+  # Store result back to L2
+  tS = store.async(dst=Y_tile_i, src=Y_pp_i, deps=[tR])
+
+endloop
