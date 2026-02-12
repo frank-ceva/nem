@@ -1,0 +1,91 @@
+# GEMM + Bias + ReLU — Tiled Fully-Connected Layer
+#
+# A tiled matrix multiply typical of transformer attention or
+# fully-connected layers.  Tiles along the M (row) dimension,
+# with ping-pong L1 buffers and double-buffered DMA prefetch.
+#
+# Y = ReLU(A · B + C)
+#   A : [M, K]  activation     (f16)
+#   B : [K, N]  weights        (f16)
+#   C : [N]     bias           (f16)
+#   Y : [M, N]  output         (f16)
+
+device "npm_lite.cfg"
+
+program gemm_bias_relu:
+
+# --- Compile-time constants ---
+const TiM = 64
+const K = 256
+const N = 128
+const T = 4
+
+const elem_bytes = 2                        # f16 = 2 bytes per element
+const tileA_bytes = TiM * K * elem_bytes     # 32768
+const tileB_bytes = K * N * elem_bytes       # 65536
+const tileY_bytes = TiM * N * elem_bytes     # 16384
+const bias_bytes = N * elem_bytes            # 256
+
+# ── L2: full tensors ──────────────────────────────────
+buffer A_L2 : L2 (size=T * tileA_bytes, align=64)
+buffer B_L2 : L2 (size=tileB_bytes, align=64)
+buffer C_L2 : L2 (size=bias_bytes, align=64)
+buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
+
+# ── L1: working tiles (ping-pong for A and Y) ────────
+buffer A_L1 : L1 (size=2*tileA_bytes, align=64)
+buffer B_L1 : L1 (size=tileB_bytes,   align=64)
+buffer Y_L1 : L1 (size=2*tileY_bytes, align=64)
+
+loop i in [0..T-1] @max_in_flight(2):
+
+  # L2 source / destination regions (one tile-row of M)
+  let A_tile_i = region(A_L2, i * tileA_bytes, tileA_bytes)
+                 elem=f16, shape=[TiM, K], layout=MK
+
+  let Y_tile_i = region(Y_L2, i * tileY_bytes, tileY_bytes)
+                 elem=f16, shape=[TiM, N], layout=MN
+                 @materialized
+
+  # L1 ping-pong slots
+  let A_pp_i = region(A_L1, (i mod 2)*tileA_bytes, tileA_bytes)
+               elem=f16, shape=[TiM, K], layout=MK
+
+  let Y_pp_i = region(Y_L1, (i mod 2)*tileY_bytes, tileY_bytes)
+               elem=f16, shape=[TiM, N], layout=MN
+               @materialized
+
+  # Weights (shared across tiles) and bias
+  let B_l1 = region(B_L1, 0, tileB_bytes)
+             elem=f16, shape=[K, N], layout=KN
+
+  let C_l2 = region(C_L2, 0, bias_bytes)
+             elem=f16, shape=[N], layout=N
+             @readonly
+
+  # ── DMA prefetch ──────────────────────────────────
+  tA = transfer.async(dst=A_pp_i, src=A_tile_i)
+  tB = transfer.async(
+         dst=B_l1,
+         src=region(B_L2, 0, tileB_bytes)
+             elem=f16, shape=[K, N], layout=KN
+       )
+  wait(tA, tB)
+
+  # ── Compute: matrix multiply with bias ────────────
+  tG = gemm.async
+         in  A_pp_i, B_l1, C_l2
+         out Y_pp_i
+         deps=[tA, tB]
+         accum_type=f32
+
+  # ── Post-op: activation ───────────────────────────
+  tR = relu.async
+         in  Y_pp_i
+         out Y_pp_i @materialized
+         deps=[tG]
+
+  # ── Store result back to L2 ───────────────────────
+  tS = store.async(dst=Y_tile_i, src=Y_pp_i, deps=[tR])
+
+endloop

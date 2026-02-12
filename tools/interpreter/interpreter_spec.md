@@ -153,7 +153,7 @@ interp = NemInterpreter(device="path/to/device.cfg")
 # Or with inline device config
 interp = NemInterpreter(device="npm_lite")  # built-in device name
 
-# Or with no device (device-agnostic mode — only baseline types)
+# Or with no device (device-agnostic mode — no device validation)
 interp = NemInterpreter()
 ```
 
@@ -568,10 +568,10 @@ The `DeviceResolver` component:
 
 1. Parses the device configuration block(s)
 2. Resolves `extends` inheritance chains (single-parent, multi-level allowed)
-3. Validates schema rules (spec_version, baseline, topology constraints)
+3. Validates schema rules (spec_version, topology constraints)
 4. Computes the **effective type family set**:
    ```
-   effective[op] = baseline_must[op] ∪ opcode.mandatory[op] ∪ opcode.extended[op]
+   effective[op] = opcode.mandatory[op] ∪ opcode.extended[op]
    ```
 5. Validates disjointness: `opcode.mandatory ∩ opcode.extended == ∅`
 6. Validates that resolved `opcode.mandatory` is non-empty
@@ -583,7 +583,6 @@ The resolved device is stored as a `DeviceConfig` object:
 class DeviceConfig:
     name: str
     spec_version: str
-    baseline: str
     num_engines: int
     per_engine: dict[str, int]    # {"NMU": 1, "CSTL": 2, "DMA": 2}
     mandatory_variants: set[str]  # {"gemm.float<bf16>.no_bias", ...}
@@ -922,7 +921,6 @@ class DeviceConfigNode:
     name: str
     extends: str | None
     spec_version: str | None
-    baseline: str | None
     topology: TopologyNode | None
     mandatory: list[str]
     extended: list[str]

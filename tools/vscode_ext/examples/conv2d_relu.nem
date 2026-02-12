@@ -48,8 +48,8 @@ loop i in [0..15] @max_in_flight(2):
 
   # Run convolution on NMU
   tC = conv2d.async
-          IN  X_pp_i, W_l1, B_l2
-          OUT Y_pp_i
+          in  X_pp_i, W_l1, B_l2
+          out Y_pp_i
           deps=[tX, tW]
           pads=[1,1,1,1]
           strides=[1,1]
@@ -59,8 +59,8 @@ loop i in [0..15] @max_in_flight(2):
 
   # Run ReLU post-op
   tR = relu.async
-          IN  Y_pp_i
-          OUT Y_pp_i @materialized
+          in  Y_pp_i
+          out Y_pp_i @materialized
           deps=[tC]
 
   # Store result back to L2

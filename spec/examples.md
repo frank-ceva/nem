@@ -67,10 +67,9 @@ Tiling is explicit.
 ### Device Configuration File (`npm_lite.cfg`)
 
 ```text
-device npm_lite {
-    spec_version = "NEM-1.0"
-    baseline     = "nem_baseline_1.0"
+include "nem_baseline_1.0.nem"
 
+device npm_lite extends nem_baseline_1_0 {
     topology {
         num_engines = 1
         per_engine {
@@ -81,9 +80,9 @@ device npm_lite {
     }
 
     opcode.mandatory {
-        conv2d.int8<i16>.with_bias      // 16-bit output accumulation for Conv2D
-        eltwise<i32>.default            // 32-bit elementwise (e.g. bias add before requant)
-        dequantize<i8, f32>.default     // dequantize to FP32 for mixed-precision paths
+        conv2d.int8<i16>.with_bias      # 16-bit output accumulation for Conv2D
+        eltwise<i32>.default            # 32-bit elementwise (e.g. bias add before requant)
+        dequantize<i8, f32>.default     # dequantize to FP32 for mixed-precision paths
     }
 }
 ```
@@ -94,10 +93,26 @@ device "npm_lite.cfg"
 
 program conv2d_relu:
 
-buffer X_L2 : L2 (size=..., align=64)
-buffer W_L2 : L2 (size=..., align=64)
-buffer B_L2 : L2 (size=..., align=64)
-buffer Y_L2 : L2 (size=..., align=64)
+# --- Compile-time constants ---
+const TiH = 16
+const TiW = 16
+const Cin = 64
+const Cout = 128
+const Kh = 3
+const Kw = 3
+const ToH = 14
+const ToW = 14
+const T = 4
+
+const tileX_bytes = TiH * TiW * Cin        # 16384
+const tileW_bytes = Kh * Kw * Cin * Cout    # 294912
+const tileY_bytes = ToH * ToW * Cout        # 25088
+const bias_bytes = Cout * 4                 # i32 = 4 bytes per element
+
+buffer X_L2 : L2 (size=T * tileX_bytes, align=64)
+buffer W_L2 : L2 (size=tileW_bytes, align=64)
+buffer B_L2 : L2 (size=bias_bytes, align=64)
+buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
 
 buffer X_L1 : L1 (size=2*tileX_bytes, align=64)
 buffer W_L1 : L1 (size=tileW_bytes,   align=64)
@@ -171,10 +186,9 @@ Target device: `capabilities.per_engine.units[CSTL] = 4`
 #### Device Configuration File (`npm_quad_cstl.cfg`)
 
 ```text
-device npm_quad_cstl {
-    spec_version = "NEM-1.0"
-    baseline     = "nem_baseline_1.0"
+include "nem_baseline_1.0.nem"
 
+device npm_quad_cstl extends nem_baseline_1_0 {
     topology {
         num_engines = 1
         per_engine {
@@ -185,9 +199,9 @@ device npm_quad_cstl {
     }
 
     opcode.mandatory {
-        eltwise<f32>.default            // FP32 elementwise for high-precision post-ops
-        eltwise<bf16>.default           // BF16 elementwise
-        view<f32>.default               // FP32 view ops
+        eltwise<f32>.default            # FP32 elementwise for high-precision post-ops
+        eltwise<bf16>.default           # BF16 elementwise
+        view<f32>.default               # FP32 view ops
     }
 }
 ```
@@ -199,9 +213,20 @@ device "npm_quad_cstl.cfg"
 
 program gemm_relu_multi_cstl:
 
-buffer X_L2 : L2 (size=..., align=64)
-buffer W_L2 : L2 (size=..., align=64)
-buffer Y_L2 : L2 (size=..., align=64)
+# --- Compile-time constants ---
+const TiM = 64
+const K = 256
+const N = 128
+const T = 8
+
+const elem_bytes = 2                        # f16 = 2 bytes per element
+const tileX_bytes = TiM * K * elem_bytes     # 32768
+const tileW_bytes = K * N * elem_bytes       # 65536
+const tileY_bytes = TiM * N * elem_bytes     # 16384
+
+buffer X_L2 : L2 (size=T * tileX_bytes, align=64)
+buffer W_L2 : L2 (size=tileW_bytes, align=64)
+buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
 
 buffer X_L1 : L1 (size=4*tileX_bytes, align=64)   # 4-slot ring buffer
 buffer W_L1 : L1 (size=tileW_bytes,   align=64)

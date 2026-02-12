@@ -99,7 +99,7 @@
         },
         {
           "name": "keyword.other.config.nem",
-          "match": "\\b(topology|per_engine|num_engines|spec_version|baseline|extends)\\b"
+          "match": "\\b(topology|per_engine|num_engines|spec_version|extends)\\b"
         }
       ]
     },

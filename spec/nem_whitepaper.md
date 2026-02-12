@@ -24,7 +24,7 @@ NEM (NeuPro-M Execution Model) is introduced to fill this gap, as an intermediat
 
 NEM's main benefits are:
 - A well-defined architecture abstraction layer suitable for programming the NPM hardware. The level of abstraction is :
-  - "low enough" to expose all meaningful hardware mechanisms that define the essence of the hardware mechanisms so that it becomes possible to generate hardware-optimized code that takes into account its main characteristics, 
+  - "low enough" to expose all meaningful hardware mechanisms that define the essence of the hardware mechanisms so that it becomes possible to generate hardware-optimized code that takes into account its main characteristics,
   - while being "high enough" so that it hides hardware mechanisms that deal with hardware constraints but should be invisble to software engineers (well, except maybe a handful number of software engineers, aka deep firmware engineers) that will have to understand these details. With NEM though, they can focus their knowledge and expertise on a well-bounded scope: understand NEM, TCB, and how to translate from NEM to TCB. These engineers won't have to understand neural networks, and earlier compiler passes
 - An intermediate abstraction capable of simulating all NPM parallel behavior, possibly randomizing execution to ensure that architecture correctness is guaranteed across micro-architecture variants
 - An intermediate lowering step enabling software developers (or compilers) to write code without having to understand and master micro-architecture details that affect performance tuning but not functional correctness of the entire dataflow
@@ -120,95 +120,289 @@ Bank selection, burst modes, store formats, arbitration, and path legality are e
 
 ---
 
-## Comparative Analysis
+## NEM in Action
 
-This section provides a systematic comparison of NEM against ONNX, MLIR, and TCB. To ensure the comparison is exhaustive, we first define a **concept template** — an enumeration of all concepts relevant to execution models for accelerators like NeuPro-M. This template is then used to compare NEM against each alternative.
+The following examples show NEM applied to common neural-network building blocks. Each example targets a minimal single-engine device and demonstrates the core execution pattern: declare buffers at each memory level, tile the computation with bounded pipelining, prefetch via DMA, compute, and store back.
 
-### Concept Template
+### Example 1 — Conv2D + ReLU (Tiled Inference Pipeline)
 
-The following concepts represent the full set of concerns that an execution model for a software-managed accelerator must address. Each concept is categorized into a domain.
+A fused convolution-activation pipeline, the most common pattern in CNN inference. Two tiles overlap in flight (`@max_in_flight(2)`) using ping-pong L1 buffers.
 
-| # | Domain | Concept | Description |
-|---|--------|---------|-------------|
-| 1 | Purpose | Stability contract | Whether it provides long-term API/ABI stability |
-| 2 | Memory | Memory hierarchy awareness | Explicit levels (DDR/L2/L1) vs flat/implicit |
-| 3 | Memory | Buffer allocation | How storage is declared and managed |
-| 4 | Memory | Buffer lifetime/reuse | Can buffer reuse patterns be expressed and verified? |
-| 5 | Memory | Region/view model | Typed sub-views into buffers with offset/extent |
-| 6 | Memory | Address space model | Physical addresses vs logical handles |
-| 7 | Data Movement | Explicit data transfers | Are data movements between memory levels explicit? |
-| 8 | Data Movement | DMA modeling | Can DMA operations be expressed as first-class tasks? |
-| 9 | Data Movement | Store semantics | Distinct architectural commitment step for writeback |
-| 10 | Data Movement | Transfer/compute overlap | Can data movement overlap with computation? |
-| 11 | Compute | Operation representation | How compute operations are expressed |
-| 12 | Compute | Opcode granularity | Individual instructions, operators, or fused subgraphs? |
-| 13 | Type System | Static typing | Whether types are checked at compile time |
-| 14 | Type System | Type legality per opcode | Per-opcode type constraints and validation |
-| 15 | Type System | Implicit type conversions | Whether the model performs implicit casts |
-| 16 | Type System | Quantization modeling | How quantized types and metadata are represented |
-| 17 | Tiling | Tiling model | How tiling of operations is expressed |
-| 18 | Tiling | Tile-level readiness | Can partial tensor availability be expressed? |
-| 19 | Concurrency | Synchronization model | How dependencies and ordering are expressed |
-| 20 | Concurrency | Bounded pipelining | Explicit bound on concurrent in-flight iterations |
-| 21 | Concurrency | Multi-engine parallelism | Support for multiple independent execution domains |
-| 22 | Concurrency | Intra-engine parallelism | Exploiting multiple units within one engine |
-| 23 | Optimization | Fusion control | Can the programmer control operator fusion boundaries? |
-| 24 | Optimization | Materialization semantics | Can intermediate value visibility be specified? |
-| 25 | Optimization | Scheduling freedom | How much reordering latitude is given to the compiler/binder? |
-| 26 | Hardware | Device topology description | Can hardware configuration be declared? |
-| 27 | Hardware | Execution unit binding | Can tasks be bound to specific hardware units? |
-| 28 | Hardware | Microarchitecture isolation | Is microarchitectural detail excluded from the model? |
-| 29 | Hardware | Hardware portability | Do programs survive hardware revisions? |
-| 30 | Hardware | Late binding | Can programs be rebound to different HW instances? |
-| 31 | Specification | Formal grammar | Is there a formal language definition? |
-| 32 | Specification | Hazard/aliasing rules | Are memory safety rules formally defined? |
+```text
+device "npm_lite.cfg"
+
+program conv2d_relu:
+
+# --- Compile-time constants ---
+const TiH = 16
+const TiW = 16
+const Cin = 64
+const Cout = 128
+const Kh = 3
+const Kw = 3
+const ToH = 14
+const ToW = 14
+const T = 4
+
+const tileX_bytes = TiH * TiW * Cin        # 16384
+const tileW_bytes = Kh * Kw * Cin * Cout    # 294912
+const tileY_bytes = ToH * ToW * Cout        # 25088
+const bias_bytes = Cout * 4                 # i32 = 4 bytes per element
+
+buffer X_L2 : L2 (size=T * tileX_bytes, align=64)
+buffer W_L2 : L2 (size=tileW_bytes, align=64)
+buffer B_L2 : L2 (size=bias_bytes, align=64)
+buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
+
+buffer X_L1 : L1 (size=2*tileX_bytes, align=64)
+buffer W_L1 : L1 (size=tileW_bytes,   align=64)
+buffer Y_L1 : L1 (size=2*tileY_bytes, align=64)
+
+loop i in [0..T-1] @max_in_flight(2):
+
+  let X_tile_i = region(X_L2, i * tileX_bytes, tileX_bytes)
+                 elem=i8, shape=[1,TiH,TiW,Cin], layout=NHWC
+
+  let Y_tile_i = region(Y_L2, i * tileY_bytes, tileY_bytes)
+                 elem=i8, shape=[1,ToH,ToW,Cout], layout=NHWC
+                 @materialized
+
+  let X_pp_i = region(X_L1, (i mod 2)*tileX_bytes, tileX_bytes)
+               elem=i8, shape=[1,TiH,TiW,Cin], layout=NHWC
+
+  let Y_pp_i = region(Y_L1, (i mod 2)*tileY_bytes, tileY_bytes)
+               elem=i8, shape=[1,ToH,ToW,Cout], layout=NHWC
+               @materialized
+
+  let W_l1 = region(W_L1, 0, tileW_bytes)
+             elem=i8, shape=[Kh,Kw,Cin,Cout], layout=HWIO
+
+  let B_l2 = region(B_L2, 0, bias_bytes)
+             elem=i32, shape=[Cout], layout=C
+             @readonly
+
+  tX = transfer.async(dst=X_pp_i, src=X_tile_i)
+  tW = transfer.async(
+         dst=W_l1,
+         src=region(W_L2, 0, tileW_bytes)
+             elem=i8, shape=[Kh,Kw,Cin,Cout], layout=HWIO
+       )
+  wait(tX, tW)
+
+  tC = conv2d.async
+          in  X_pp_i, W_l1, B_l2
+          out Y_pp_i
+          deps=[tX, tW]
+          pads=[1,1,1,1]
+          strides=[1,1]
+          dilations=[1,1]
+          groups=1
+          accum_type=i32
+
+  tR = relu.async
+          in  Y_pp_i
+          out Y_pp_i @materialized
+          deps=[tC]
+
+  tS = store.async(dst=Y_tile_i, src=Y_pp_i, deps=[tR])
+
+endloop
+```
+
+**What to notice:**
+- **Buffers** are declared at L2 (full tensors) and L1 (working tiles). L1 buffers are sized for 2 slots to support ping-pong.
+- **Regions** are typed views: `X_pp_i` selects the current ping-pong slot using `(i mod 2)`.
+- **Tokens** (`tX`, `tW`, `tC`, `tR`, `tS`) thread dependencies through the pipeline — the binder is free to overlap anything not ordered by tokens.
+- **`@max_in_flight(2)`** bounds concurrent iterations to 2, guaranteeing safe L1 reuse.
+- **`@materialized`** on `Y_pp_i` tells the binder that the ReLU output must exist as a real value (no fusing it away).
+
+### Example 2 — GEMM + Bias + ReLU (Fully-Connected / Attention Layer)
+
+A tiled matrix multiply typical of transformer attention or MLP layers. The same execution pattern applies — only the compute opcode changes from `conv2d` to `gemm`.
+
+```text
+device "npm_lite.cfg"
+
+program gemm_bias_relu:
+
+# --- Compile-time constants ---
+const TiM = 64
+const K = 256
+const N = 128
+const T = 4
+
+const elem_bytes = 2                        # f16 = 2 bytes per element
+const tileA_bytes = TiM * K * elem_bytes     # 32768
+const tileB_bytes = K * N * elem_bytes       # 65536
+const tileY_bytes = TiM * N * elem_bytes     # 16384
+const bias_bytes = N * elem_bytes            # 256
+
+buffer A_L2 : L2 (size=T * tileA_bytes, align=64)
+buffer B_L2 : L2 (size=tileB_bytes, align=64)
+buffer C_L2 : L2 (size=bias_bytes, align=64)
+buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
+
+buffer A_L1 : L1 (size=2*tileA_bytes, align=64)
+buffer B_L1 : L1 (size=tileB_bytes,   align=64)
+buffer Y_L1 : L1 (size=2*tileY_bytes, align=64)
+
+loop i in [0..T-1] @max_in_flight(2):
+
+  let A_tile_i = region(A_L2, i * tileA_bytes, tileA_bytes)
+                 elem=f16, shape=[TiM, K], layout=MK
+
+  let Y_tile_i = region(Y_L2, i * tileY_bytes, tileY_bytes)
+                 elem=f16, shape=[TiM, N], layout=MN
+                 @materialized
+
+  let A_pp_i = region(A_L1, (i mod 2)*tileA_bytes, tileA_bytes)
+               elem=f16, shape=[TiM, K], layout=MK
+
+  let Y_pp_i = region(Y_L1, (i mod 2)*tileY_bytes, tileY_bytes)
+               elem=f16, shape=[TiM, N], layout=MN
+               @materialized
+
+  let B_l1 = region(B_L1, 0, tileB_bytes)
+             elem=f16, shape=[K, N], layout=KN
+
+  let C_l2 = region(C_L2, 0, bias_bytes)
+             elem=f16, shape=[N], layout=N
+             @readonly
+
+  tA = transfer.async(dst=A_pp_i, src=A_tile_i)
+  tB = transfer.async(
+         dst=B_l1,
+         src=region(B_L2, 0, tileB_bytes)
+             elem=f16, shape=[K, N], layout=KN
+       )
+  wait(tA, tB)
+
+  tG = gemm.async
+         in  A_pp_i, B_l1, C_l2
+         out Y_pp_i
+         deps=[tA, tB]
+         accum_type=f32
+
+  tR = relu.async
+         in  Y_pp_i
+         out Y_pp_i @materialized
+         deps=[tG]
+
+  tS = store.async(dst=Y_tile_i, src=Y_pp_i, deps=[tR])
+
+endloop
+```
+
+**What to notice:**
+- The structure is identical to Conv2D — NEM's execution model is **uniform** across operation types. The programming pattern (prefetch → compute → post-op → store) remains the same.
+- **`gemm.async`** with `accum_type=f32` uses f16 inputs but accumulates in f32 for precision — matching the `gemm.float<f16>.with_bias` type family.
+- Bias `C_l2` is marked `@readonly` — the binder knows it can be shared across iterations without hazard.
+
+### Example 3 — Conv2D + MaxPool (Multi-Op Pipeline)
+
+A two-stage pipeline common in classification networks. The convolution output is an intermediate value that feeds into spatial down-sampling via max-pooling.
+
+```text
+device "npm_lite.cfg"
+
+program conv2d_maxpool:
+
+# --- Compile-time constants ---
+const TiH = 16
+const TiW = 16
+const Cin = 64
+const Cout = 128
+const Kh = 3
+const Kw = 3
+const ToH = 14
+const ToW = 14
+const ToH_p = 7                              # pooled output height (ToH / 2)
+const ToW_p = 7                              # pooled output width  (ToW / 2)
+const T = 4
+
+const tileX_bytes = TiH * TiW * Cin         # 16384
+const tileW_bytes = Kh * Kw * Cin * Cout     # 294912
+const tileC_bytes = ToH * ToW * Cout         # 25088 (conv output)
+const tileY_bytes = ToH_p * ToW_p * Cout     # 6272  (pooled output)
+
+buffer X_L2 : L2 (size=T * tileX_bytes, align=64)
+buffer W_L2 : L2 (size=tileW_bytes, align=64)
+buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
+
+buffer X_L1 : L1 (size=2*tileX_bytes, align=64)
+buffer W_L1 : L1 (size=tileW_bytes,   align=64)
+buffer C_L1 : L1 (size=2*tileC_bytes, align=64)   # conv output / pool input
+buffer Y_L1 : L1 (size=2*tileY_bytes, align=64)
+
+loop i in [0..T-1] @max_in_flight(2):
+
+  let X_tile_i = region(X_L2, i * tileX_bytes, tileX_bytes)
+                 elem=i8, shape=[1, TiH, TiW, Cin], layout=NHWC
+
+  let Y_tile_i = region(Y_L2, i * tileY_bytes, tileY_bytes)
+                 elem=i8, shape=[1, ToH_p, ToW_p, Cout], layout=NHWC
+                 @materialized
+
+  let X_pp_i = region(X_L1, (i mod 2)*tileX_bytes, tileX_bytes)
+               elem=i8, shape=[1, TiH, TiW, Cin], layout=NHWC
+
+  # Intermediate: conv output, marked @materialized so the binder
+  # keeps it as a real value boundary between conv2d and maxpool.
+  let C_pp_i = region(C_L1, (i mod 2)*tileC_bytes, tileC_bytes)
+               elem=i8, shape=[1, ToH, ToW, Cout], layout=NHWC
+               @materialized
+
+  let Y_pp_i = region(Y_L1, (i mod 2)*tileY_bytes, tileY_bytes)
+               elem=i8, shape=[1, ToH_p, ToW_p, Cout], layout=NHWC
+               @materialized
+
+  let W_l1 = region(W_L1, 0, tileW_bytes)
+             elem=i8, shape=[Kh, Kw, Cin, Cout], layout=HWIO
+
+  tX = transfer.async(dst=X_pp_i, src=X_tile_i)
+  tW = transfer.async(
+         dst=W_l1,
+         src=region(W_L2, 0, tileW_bytes)
+             elem=i8, shape=[Kh, Kw, Cin, Cout], layout=HWIO
+       )
+  wait(tX, tW)
+
+  tC = conv2d.async
+         in  X_pp_i, W_l1
+         out C_pp_i
+         deps=[tX, tW]
+         pads=[1,1,1,1]
+         strides=[1,1]
+         dilations=[1,1]
+         groups=1
+         accum_type=i32
+
+  tP = maxpool.async
+         in  C_pp_i
+         out Y_pp_i @materialized
+         deps=[tC]
+         kernel_shape=[2,2]
+         pads=[0,0,0,0]
+         strides=[2,2]
+
+  tS = store.async(dst=Y_tile_i, src=Y_pp_i, deps=[tP])
+
+endloop
+```
+
+**What to notice:**
+- **Two compute stages** chain through tokens: `tC` (conv2d) feeds `tP` (maxpool). The binder cannot reorder them because `tP` depends on `tC`.
+- **`C_pp_i` is `@materialized`** — this prevents the binder from fusing conv2d and maxpool into a single opaque operation. The intermediate convolution result must exist as an architecturally visible value.
+- **Three L1 buffer pools** (`X_L1`, `C_L1`, `Y_L1`) hold different stages of the pipeline. The conv output (`C_L1`) is distinct from the final pooled output (`Y_L1`) because maxpool changes spatial dimensions.
+- Removing `@materialized` from `C_pp_i` would permit the binder to fuse the two stages — a deliberate optimization choice left to the programmer.
 
 ---
 
-### Master Comparison Table
+## Where NEM Fits
 
-The following table applies the concept template to all four models. This provides a high-level overview; detailed per-comparison analysis follows.
+NEM occupies a precise niche in the compilation stack: above graph-level representations (ONNX) and compiler IRs (MLIR), and below hardware-bound control structures (TCBs). Each layer has a distinct zone of competence, and NEM fills the execution-level gap that the others intentionally leave open.
 
-| # | Concept | ONNX | MLIR | NEM | TCB |
-|---|---------|------|------|-----|-----|
-| 1 | Stability contract | Versioned, backward-compatible | No stability obligation | Versioned, hardware-decoupled | Tied to silicon revision |
-| 2 | Memory hierarchy | Flat / implicit | Dialect-dependent | Explicit 3-level (DDR/L2/L1) | Physical addresses + banks |
-| 3 | Buffer allocation | Implicit (framework manages) | Dialect-dependent (memref) | Explicit (level, size, align) | Physical allocation by toolchain |
-| 4 | Buffer lifetime/reuse | Not expressible | Expressible via analysis | Explicit (bounded pipelining) | Implicit in address reuse |
-| 5 | Region/view model | Tensor values (immutable) | memref with layout maps | Typed views (offset, extent, elem, shape) | Raw byte ranges + register fields |
-| 6 | Address space | Not applicable | Abstract (memref spaces) | Logical handles (opaque) | Physical addresses |
-| 7 | Explicit data transfers | No | Expressible (async dialect) | Yes (transfer.async/sync) | Yes (DMA descriptors) |
-| 8 | DMA modeling | No | Not first-class | Yes (first-class DMA tasks) | Yes (channel-level config) |
-| 9 | Store semantics | No | No | Yes (store.async/sync) | Yes (store format registers) |
-| 10 | Transfer/compute overlap | Not expressible | Expressible (async tokens) | Explicit (tokens + max_in_flight) | Implicit in HW pipeline |
-| 11 | Operation representation | Named operators (string) | Operations in dialects | Dedicated opcodes (fixed signature) | Register configurations |
-| 12 | Opcode granularity | Single operators | Any granularity | Single operators | Micro-operations |
-| 13 | Static typing | Shape inference | Verifier-based | Fully static, mandatory | N/A (raw register values) |
-| 14 | Type legality per opcode | Not constrained | Dialect verifier | Type families + conformance (MUST/MAY) | Implicit in HW behavior |
-| 15 | Implicit type conversions | Yes (some ops auto-cast) | Dialect-dependent | No (explicit cast/quantize required) | N/A |
-| 16 | Quantization modeling | Separate QuantizeLinear op | Dialect-dependent | Region attribute (quant descriptor) | Implicit in data format |
-| 17 | Tiling model | Not expressible | Affine maps / loops | First-class loops with @max_in_flight | Embedded in TCB chaining |
-| 18 | Tile-level readiness | No | Expressible (tokens) | Yes (completion tokens) | Tag-based synchronization |
-| 19 | Synchronization model | Implicit (data flow) | Async tokens / barriers | Explicit tokens (sole primitive) | Tag matching + HW arbitration |
-| 20 | Bounded pipelining | Not applicable | Not built-in | @max_in_flight(N) on loops | Implicit in buffer count |
-| 21 | Multi-engine parallelism | Not applicable | Not built-in | Engine-indexed L1, concurrent execution | Engine-specific TCB streams |
-| 22 | Intra-engine parallelism | Not applicable | Not built-in | @resource(unit[idx]) binding | Explicit sub-unit targeting |
-| 23 | Fusion control | Not expressible | Pass-based (no program control) | @materialized decorator | N/A (already fully expanded) |
-| 24 | Materialization semantics | All outputs materialized | Dialect-dependent | Explicit (@materialized or fusible) | All values materialized |
-| 25 | Scheduling freedom | Not applicable (no scheduling) | Full (compiler decides) | Bounded (deps + decorators) | None (fully determined) |
-| 26 | Device topology | Not applicable | Not built-in | Device configuration (engines, units) | Implicit (toolchain knows) |
-| 27 | Execution unit binding | Not applicable | Not built-in | @resource decorator (optional) | Explicit per-TCB |
-| 28 | Microarch isolation | N/A (too high) | N/A (general-purpose) | Yes (strict exclusion) | No (is the microarchitecture) |
-| 29 | Hardware portability | Yes (device-agnostic) | Yes (target-agnostic) | Yes (across NPM revisions) | No (revision-specific) |
-| 30 | Late binding | N/A | N/A | Yes (binder produces TCBs) | N/A (already bound) |
-| 31 | Formal grammar | Protobuf schema | EBNF per dialect | Full EBNF grammar | Register-level encoding spec |
-| 32 | Hazard/aliasing rules | N/A (SSA values) | Dialect-dependent | Normative (overlap, reuse, bounds) | Programmer responsibility |
-
----
-
-### Quick-Reference Support Matrix
-
-The following table uses the same concept template as the master comparison, extended with additional concepts from the graph/ML, compiler IR, and microarchitectural domains. This ensures the matrix covers each model's zone of competence — not just NEM's — so that intentional exclusions are as visible as supported features.
+The following support matrix makes this positioning concrete. It covers 48 concepts spanning five domains — from graph/ML abstractions through execution semantics to microarchitectural detail — so that each model's intentional exclusions are as visible as its strengths.
 
 **Legend:** ✓ = supported | ~ = partial or dialect/context-dependent | ✗ = not supported
 
@@ -279,6 +473,8 @@ The following table uses the same concept template as the master comparison, ext
 - **NEM occupies the only unclaimed niche.** The execution-level concepts (rows 1–32) that NEM fully covers are exactly those where ONNX shows ✗ and TCB shows either ✗ or ~. MLIR can partially express many of them (~) but commits to none.
 - **The Optimization domain** (rows 23–25) uniquely distinguishes NEM: it is the only model where all three concepts (fusion control, materialization, scheduling freedom) are explicitly supported.
 
+For detailed per-model analysis (NEM vs ONNX, NEM vs MLIR, NEM vs TCB), see the companion document [comparison_tables.md](comparison_tables.md).
+
 ---
 
 ## Engineering Value
@@ -311,4 +507,3 @@ The comparative analysis demonstrates that NEM fills a precise and necessary gap
 The formal specification, formal language grammar, and complete worked examples are provided in the companion documents [nem_spec.md](nem_spec.md), [examples.md](examples.md) and [comparison_tables.md](comparison_tables.md).
 
 ---
-

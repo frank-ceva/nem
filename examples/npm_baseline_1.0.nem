@@ -1,0 +1,178 @@
+# NEM Baseline 1.0 — Standard Baseline Device and Type Family Catalog
+#
+# This file defines:
+#   1. The exhaustive set of type family definitions for NEM 1.0
+#   2. The baseline device (nem_baseline_1_0) listing all MUST-class variants
+#
+# All conformant NEM 1.0 devices MUST inherit from nem_baseline_1_0
+# (or equivalently include all its opcode.mandatory variants).
+#
+# Usage:
+#   include "nem_baseline_1.0.nem"
+#   device my_device extends nem_baseline_1_0 {
+#       topology { ... }
+#       opcode.mandatory { ... }   # device-specific additions
+#   }
+
+# ═══════════════════════════════════════════════════════════════════
+# Type Family Definitions (Normative)
+# ═══════════════════════════════════════════════════════════════════
+#
+# These definitions enumerate all legal opcode-type combinations
+# and their conformance classes (MUST / MAY).
+
+# ── Convolution ─────────────────────────────────────────────────
+
+type_family conv2d.float<T: {f16, bf16, f32}> {
+    X: T
+    W: T
+    Y: T
+    accum = f32
+    quant = absent
+
+    variants:
+      no_bias: { B: absent }
+        conformance: { MUST <f16>   MAY <bf16>   MAY <f32> }
+      with_bias: { B: T }
+        conformance: { MUST <f16>   MAY <bf16>   MAY <f32> }
+}
+
+type_family conv2d.int8<T_out: {i8, i16}> {
+    X: i8
+    W: i8
+    Y: T_out
+    accum = i32
+    quant = required
+
+    variants:
+      no_bias: { B: absent }
+        conformance: { MUST <i8> }
+      with_bias: { B: i32 }
+        conformance: { MUST <i8>   MAY <i16> }
+}
+
+# ── Linear Algebra ──────────────────────────────────────────────
+
+type_family gemm.float<T: {f16, bf16, f32}> {
+    A: T
+    B: T
+    Y: T
+    accum = f32
+    quant = absent
+
+    variants:
+      no_bias: { C: absent }
+        conformance: { MUST <f16>   MAY <bf16>   MAY <f32> }
+      with_bias: { C: T }
+        conformance: { MUST <f16> }
+}
+
+type_family gemm.int8<T_out: {i8, i16}> {
+    A: i8
+    B: i8
+    Y: T_out
+    accum = i32
+    quant = required
+
+    variants:
+      no_bias: { C: absent }
+        conformance: { MUST <i8> }
+      with_bias: { C: i32 }
+        conformance: { MUST <i8>   MAY <i16> }
+}
+
+# ── Elementwise ─────────────────────────────────────────────────
+
+type_family eltwise<T: {i8, i16, i32, f16, bf16, f32}> {
+    input: T
+    output: T
+
+    variants:
+      default: {}
+        conformance: { MUST <i8>   MUST <f16>   MAY <i16>   MAY <i32>   MAY <bf16>   MAY <f32> }
+}
+
+# ── View / Layout ───────────────────────────────────────────────
+
+type_family view<T: {i8, i16, i32, f16, bf16, f32}> {
+    input: T
+    output: T
+
+    variants:
+      default: {}
+        conformance: { MUST <i8>   MUST <f16>   MAY <i16>   MAY <i32>   MAY <bf16>   MAY <f32> }
+}
+
+# ── Type Conversion ─────────────────────────────────────────────
+
+type_family cast {
+    src: any_supported
+    dst: any_supported
+
+    variants:
+      default: {}
+        conformance: { MUST }
+}
+
+type_family quantize<T_src: {f16, f32}, T_dst: {i8}> {
+    src: T_src
+    dst: T_dst
+    quant = required on dst
+
+    variants:
+      default: {}
+        conformance: { MUST <f16, i8>   MAY <f32, i8> }
+}
+
+type_family dequantize<T_src: {i8}, T_dst: {f16, f32}> {
+    src: T_src
+    dst: T_dst
+    quant = required on src
+
+    variants:
+      default: {}
+        conformance: { MUST <i8, f16>   MAY <i8, f32> }
+}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Baseline Device Definition
+# ═══════════════════════════════════════════════════════════════════
+#
+# The baseline device lists every MUST-class family variant
+# instantiation. All conformant NEM 1.0 devices inherit from this
+# device and add their own topology and additional opcode support.
+#
+# This device has no topology — it is abstract. Derived devices
+# MUST provide a topology block.
+
+device npm_baseline_1_0 {
+    spec_version = "NEM-1.0"
+
+    opcode.mandatory {
+        # Linear Algebra — MUST variants
+        gemm.int8<i8>.no_bias
+        gemm.int8<i8>.with_bias
+        gemm.float<f16>.no_bias
+        gemm.float<f16>.with_bias
+
+        # Convolution — MUST variants
+        conv2d.int8<i8>.no_bias
+        conv2d.int8<i8>.with_bias
+        conv2d.float<f16>.no_bias
+        conv2d.float<f16>.with_bias
+
+        # Elementwise — MUST variants
+        eltwise<i8>.default
+        eltwise<f16>.default
+
+        # View / Layout — MUST variants
+        view<i8>.default
+        view<f16>.default
+
+        # Type Conversion — MUST variants
+        cast.default
+        quantize<f16, i8>.default
+        dequantize<i8, f16>.default
+    }
+}

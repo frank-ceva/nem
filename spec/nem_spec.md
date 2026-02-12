@@ -39,6 +39,36 @@ NEM is **not**:
 
 ---
 
+## Document Roadmap
+
+This specification introduces concepts in layers. Some sections necessarily reference
+concepts defined in later sections. The following roadmap provides orientation:
+
+1. **Abstract Machine Model** — memory hierarchy, engines, resource classes, execution units
+2. **Core Program Objects** — buffers, regions, tiles, tasks, tokens
+3. **Type System** — element types, bitwidth, shapes, layouts, quantization
+4. **Extent Consistency** — size constraints linking types to regions
+5. **Task Taxonomy** — the complete set of operations (transfer, store, compute, wait)
+6. **Design Principle** — the distinction between object attributes and decorators
+7. **Decorators** — optional refinements (`@materialized`, `@resource`, `@deterministic`, etc.)
+8. **Execution Semantics** — task readiness, completion, materialization, placement
+9. **Hazards and Aliasing** — ordering and safety rules
+10. **Loops and Bounded Pipelining** — iteration and `@max_in_flight`
+11. **Constant Declarations** — compile-time named integer constants (`const`)
+12. **Formal Language Definition** — EBNF grammar, opcode signatures, device configuration
+13. **Appendix** — type family definitions
+
+Key terms that appear before their full definition:
+- **Decorators** (e.g. `@resource`, `@materialized`) are introduced informally in the
+  Abstract Machine and Core Program Objects sections and defined formally in the
+  Decorators section.
+- **Device Configuration** is referenced in the Execution Units section and defined
+  formally in the Formal Language Definition section.
+- **Bounded pipelining** is mentioned in the Tiles section and defined in the Loops
+  section.
+
+---
+
 ## Abstract Machine Model
 
 ### Memory Levels
@@ -107,7 +137,8 @@ Each Engine contains one or more instances of each unit type.
 Instances are identified by a zero-based index within their type and Engine:
 `NMU[0]`, `CSTL[0]`..`CSTL[3]`, `DMA[0]`..`DMA[3]`.
 
-The number of instances per unit type per Engine is declared in the Device Capability Descriptor.
+The number of instances per unit type per Engine is declared in the device configuration
+(see Device Configuration Grammar and Device Configuration in the Formal Language Definition).
 
 **Execution units are orthogonal to resource classes.**
 Resource classes (COMPUTE, TRANSFER, STORE) describe *what an operation does*:
@@ -128,9 +159,9 @@ At the NEM level, a CSTL instance is a single unit capable of both post-processi
 and store-back operations. The binder maps NEM CSTL references to concrete CSTLA/CSTLB
 sub-units during lowering.
 
-When no `@resource` decorator is present (see Decorators), the binder assigns tasks to
-execution unit instances freely. Programs that omit `@resource` are fully portable and
-behave identically to programs written under prior spec revisions.
+When no `@resource` decorator is present (defined formally in the Decorators section below),
+the binder assigns tasks to execution unit instances freely. Programs that omit `@resource`
+are fully portable and behave identically to programs written under prior spec revisions.
 
 ---
 
@@ -146,7 +177,12 @@ Attributes:
 - size in bytes
 - optional alignment
 - lifetime
-- optional import/pinning
+- optional import flag (indicates the buffer's contents are provided externally, e.g. pre-loaded weights)
+
+Buffer sizes are expressed in **bytes**. When allocating buffers for sub-byte element
+types (e.g. `i4`), the size MUST be at least `⌈total_elements * bitwidth(E) / 8⌉` bytes,
+where `bitwidth(E)` is defined in the Type System section. Buffer sizes MUST be
+whole numbers of bytes; fractional-byte buffers are not permitted.
 
 Buffers are opaque handles. Programs MUST NOT assume physical addresses, banking, slice mapping,
 or interconnect topology.
@@ -165,6 +201,11 @@ A region is defined by:
 - shape (`shape[d]`)
 - layout or strides (`layout=<id>` or `strides=[s0,s1,...]`)
 - optional quantization descriptor (`quant`)
+
+Byte offset and byte extent are expressed in **bytes**. For sub-byte element types
+(e.g. `i4`), the byte extent covers the packed representation: a region of `N`
+elements of `i4` requires `⌈N * 4 / 8⌉` bytes of extent (see Extent Consistency).
+Byte offsets MUST be byte-aligned; sub-byte offset addressing is not supported.
 
 These attributes are **intrinsic** to the region: they define both the physical byte
 window and the interpretation required to execute operations on it.
@@ -192,7 +233,8 @@ Tiles:
 - do not imply materialization,
 - may map to one or more regions.
 
-Tiles exist only to structure iteration and bounded pipelining.
+Tiles exist only to structure iteration and bounded pipelining
+(see Loops and Bounded Pipelining below).
 
 ---
 
@@ -230,6 +272,28 @@ The supported set MAY be extended by future revisions.
 
 ---
 
+### Element Bitwidth
+
+The function `bitwidth(E)` returns the number of **bits** occupied by a single element of type `E`.
+
+| Element Type | `bitwidth(E)` |
+|-------------|---------------|
+| `i4` | 4 |
+| `i8`, `u8` | 8 |
+| `i16`, `u16`, `f16`, `bf16` | 16 |
+| `i32`, `u32`, `f32` | 32 |
+
+For types where `bitwidth(E) < 8`, multiple elements pack into a single byte.
+The packing order within a byte is device-defined; NEM does not prescribe
+MSB-first or LSB-first packing. Programs MUST NOT depend on a specific
+intra-byte packing order.
+
+`bitwidth(E)` is the canonical unit for size computations involving element
+counts. All extent and allocation consistency rules in this specification
+are expressed in terms of `bitwidth(E)`.
+
+---
+
 ### Shapes and Rank
 
 Each typed region has a logical tensor shape:
@@ -246,6 +310,10 @@ Layouts define logical-to-linear mapping.
 Two representations are permitted:
 - explicit `strides[]` in **elements**
 - a canonical `layout=<id>` with implicit standard strides (e.g. `NCHW`, `NHWC`, `HWIO`)
+
+Strides are measured in elements regardless of element bitwidth. For sub-byte types
+(e.g. `i4`), a stride of 1 means one element (4 bits), not one byte. The conversion
+from element strides to byte addresses is performed during lowering using `bitwidth(E)`.
 
 Layouts are semantic; binders may remap layouts if semantics are preserved.
 
@@ -289,15 +357,25 @@ carrying quantized integer data (see Quantization Descriptor above).
 Transfer and store tasks operate on raw byte ranges and do not require type attributes;
 however, type attributes MAY be present for documentation or validation purposes.
 
-## Byte Extent Consistency
+## Extent Consistency
 
-For a typed region:
-
+For a typed region with element type `E`, shape `S`, and byte extent `byte_extent`,
 the following constraints MUST hold:
 
-- `byte_extent >= num_elements(S) * sizeof(E)`
+- `byte_extent >= ⌈num_elements(S) * bitwidth(E) / 8⌉`
+
+  where `bitwidth(E)` is the element bitwidth defined in the Type System section,
+  and `⌈x⌉` denotes the ceiling function (round up to the nearest integer).
+
+  For element types where `bitwidth(E)` is a multiple of 8, this simplifies to:
+  `byte_extent >= num_elements(S) * (bitwidth(E) / 8)`
+
 - Any element addressable via the declared layout or strides MUST fall within the
   `[offset, offset + byte_extent)` range of the underlying buffer.
+
+**Sub-byte packing.** For element types with `bitwidth(E) < 8` (e.g. `i4`),
+multiple elements are packed into each byte. The minimum byte extent for a region
+of `N` elements of type `i4` is `⌈N * 4 / 8⌉ = ⌈N / 2⌉` bytes.
 
 Violations of these constraints result in undefined behavior.
 
@@ -531,21 +609,21 @@ matching variant unless constrained by `@deterministic` or other semantic decora
 The type family definitions (Appendix) classify each family variant instantiation into
 exactly one conformance class:
 
-- **MUST** — all conformant NEM implementations MUST support this family variant
-  instantiation. A binder targeting any NEM device MAY assume MUST variants are
-  available without consulting the device configuration.
+- **MUST** — all conformant NEM device configurations MUST include this family variant
+  instantiation in their `opcode.mandatory` block (either directly or via inheritance
+  from the standard baseline device). A binder MAY assume MUST variants are present
+  in any conformant device's `opcode.mandatory` set.
 
 - **MAY** — implementations MAY support this family variant instantiation; support is
   device-dependent. A program that relies on a MAY variant is portable only to devices
-  that explicitly advertise support via the device configuration.
+  that explicitly list it in `opcode.mandatory` or `opcode.extended`.
 
-###### Baseline Type Family Set
+###### MUST Variant Reference (Informative)
 
-The **Baseline Type Family Set** is the complete enumeration of all MUST family
-variant instantiations defined by a given revision of this specification. It is
-identified by a version string of the form `nem_baseline_<major>.<minor>`.
-
-The Baseline Type Family Set for this revision is **`nem_baseline_1.0`** and comprises:
+The following table enumerates all MUST-class family variant instantiations defined
+by this revision of the specification. These are the variants that every conformant
+NEM device MUST list in its `opcode.mandatory` block (either directly or via
+inheritance from the standard baseline device `nem_baseline_1_0`).
 
 | Domain | Family Variant | Opcode |
 |--------|---------------|--------|
@@ -561,16 +639,21 @@ The Baseline Type Family Set for this revision is **`nem_baseline_1.0`** and com
 | | `eltwise<f16>.default` | `relu`, `add`, `mul`, ... |
 | View / Layout | `view<i8>.default` | `transpose`, `reshape`, ... |
 | | `view<f16>.default` | `transpose`, `reshape`, ... |
-| Type Conversion | `cast.any_supported` | `cast` |
+| Type Conversion | `cast.default` | `cast` |
 | | `quantize<f16, i8>.default` | `quantize` |
 | | `dequantize<i8, f16>.default` | `dequantize` |
 
-Formal type family definitions are provided in the Appendix.
+The standard baseline device file `nem_baseline_1.0.nem` provides both these MUST
+variant listings (as a device `nem_baseline_1_0`) and the exhaustive type family
+definitions. All conformant devices SHOULD inherit from this baseline device.
 
-###### Optional Type Family Inventory
+Formal type family definitions are provided in the Appendix and in the baseline file.
 
-The following MAY family variant instantiations are defined by this revision.
-Devices advertise support for zero or more of these via the device configuration:
+###### MAY Variant Inventory
+
+The following MAY-class family variant instantiations are defined by this revision.
+Devices advertise support for zero or more of these via their `opcode.mandatory`
+(guaranteed) or `opcode.extended` (conditionally available) blocks:
 
 | Domain | Family Variant | Opcode |
 |--------|---------------|--------|
@@ -593,14 +676,17 @@ Devices advertise support for zero or more of these via the device configuration
 | Type Conversion | `quantize<f32, i8>.default` | `quantize` |
 | | `dequantize<i8, f32>.default` | `dequantize` |
 
-###### Baseline Conformance Rule (Normative)
+###### Conformance Rule (Normative)
 
-A conformant NEM implementation MUST support every MUST family variant
-instantiation in the Baseline Type Family Set corresponding to the spec revision
-it claims conformance with.
+A conformant NEM device configuration MUST include every MUST-class family variant
+instantiation (as listed in the table above and defined in the type family appendix)
+in its `opcode.mandatory` block, either directly or via inheritance from a parent
+device. The standard baseline device `nem_baseline_1_0` (defined in
+`nem_baseline_1.0.nem`) provides these MUST variants and SHOULD be used as the
+base device for all conformant device configurations.
 
-An implementation that supports additional MAY family variant instantiations
-MUST declare them in its device configuration.
+A device that supports additional MAY-class family variant instantiations MUST
+declare them in its `opcode.mandatory` or `opcode.extended` block.
 
 ---
 
@@ -617,27 +703,23 @@ section of the Formal Language Definition.
 ###### Schema Rules (Normative)
 
 1. `spec_version` MUST identify the spec revision the device conforms to.
-2. `baseline` MUST identify the Baseline Type Family Set version. It MUST match
-   the baseline defined by `spec_version`.
-3. MUST family variant instantiations are **implicitly available** on any conformant device.
-   They MUST NOT appear in `opcode.mandatory` or `opcode.extended` blocks. A binder
-   encountering a MUST variant in either block SHOULD emit a diagnostic warning and
-   MUST ignore the redundant entry.
-4. `opcode.mandatory` lists MAY family variant instantiations that are **guaranteed**
-   on this device. A compiler targeting this device MAY unconditionally use any variant
-   in `opcode.mandatory` without runtime capability queries.
-5. `opcode.extended` lists MAY family variant instantiations that are **conditionally
+2. `opcode.mandatory` lists all family variant instantiations that are **guaranteed**
+   on this device, including all MUST-class variants. A compiler targeting this device
+   MAY unconditionally use any variant in `opcode.mandatory` without runtime capability
+   queries.
+3. `opcode.extended` lists family variant instantiations that are **conditionally
    available** on this device. Their presence indicates the device supports these
    variants, but a compiler targeting a family of devices (via inheritance) SHOULD
    confirm per-device support.
-6. `opcode.mandatory ∩ opcode.extended` MUST be empty. A variant MUST NOT appear in
+4. `opcode.mandatory ∩ opcode.extended` MUST be empty. A variant MUST NOT appear in
    both blocks. A binder encountering a duplicate SHOULD emit a diagnostic warning
    and MUST ignore the redundant entry.
-7. All topology fields MUST be ≥ 1.
-8. After device resolution (including inheritance), `opcode.mandatory` MUST be
-   non-empty. Every conformant device MUST guarantee at least one MAY family
-   variant instantiation beyond the baseline. A resolved device with an empty
-   `opcode.mandatory` set is invalid.
+5. All topology fields MUST be ≥ 1. After device resolution (including inheritance),
+   a `topology` block MUST be present.
+6. After device resolution (including inheritance), `opcode.mandatory` MUST include
+   every MUST-class family variant instantiation defined by the spec revision
+   identified in `spec_version`. A resolved device whose `opcode.mandatory` set
+   does not contain all MUST variants is invalid.
 
 ###### Effective Type Family Set
 
@@ -645,16 +727,17 @@ For a given target device (after resolving inheritance, if applicable), the
 **effective type family set** for opcode `op` is:
 
 ```text
-effective[op] = baseline_must[op]
-              ∪ opcode.mandatory[op]
-              ∪ opcode.extended[op]
+effective[op] = opcode.mandatory[op] ∪ opcode.extended[op]
 ```
 
-where `baseline_must[op]` is the subset of the Baseline Type Family Set applicable
-to `op`, `opcode.mandatory[op]` is the set of MAY family variants listed in the
-device's `opcode.mandatory` block (empty if not declared), and `opcode.extended[op]`
-is the set of MAY family variants listed in the device's `opcode.extended` block
-(empty if not declared).
+where `opcode.mandatory[op]` is the set of family variants listed in the
+device's resolved `opcode.mandatory` block, and `opcode.extended[op]`
+is the set of family variants listed in the device's resolved `opcode.extended`
+block (empty if not declared).
+
+Since all MUST-class variants are explicitly listed in `opcode.mandatory` (either
+directly or inherited from the baseline device), they are naturally included in the
+effective set. No implicit inclusion mechanism is needed.
 
 A compiler targeting a concrete device (possibly resolved via `extends`) knows the
 full effective set and MAY unconditionally use any variant in it.
@@ -698,13 +781,18 @@ satisfied by rules 1, 2, or 3 above.
 
 ##### Example Device Configurations
 
-**Minimal device (baseline + minimal BF16):**
+All examples below assume the standard baseline file has been included:
 
 ```text
-device npm_lite {
-    spec_version = "NEM-1.0"
-    baseline     = "nem_baseline_1.0"
+include "nem_baseline_1.0.nem"
+```
 
+**Minimal device (MUST variants + minimal BF16):**
+
+```text
+include "nem_baseline_1.0.nem"
+
+device npm_lite extends nem_baseline_1_0 {
     topology {
         num_engines = 1
         per_engine {
@@ -722,15 +810,14 @@ device npm_lite {
 }
 ```
 
-Effective set: baseline MUST variants + BF16 GEMM, elementwise, and view.
+Effective set: inherited MUST variants (from `nem_baseline_1_0`) + BF16 GEMM, elementwise, and view.
 
 **Mid-range device with BF16 support:**
 
 ```text
-device npm_mid {
-    spec_version = "NEM-1.0"
-    baseline     = "nem_baseline_1.0"
+include "nem_baseline_1.0.nem"
 
+device npm_mid extends nem_baseline_1_0 {
     topology {
         num_engines = 2
         per_engine {
@@ -750,15 +837,14 @@ device npm_mid {
 }
 ```
 
-Effective set: baseline MUST + `opcode.mandatory` BF16 variants.
+Effective set: inherited MUST + device-specific BF16 variants in `opcode.mandatory`.
 
 **High-end base device with BF16 mandatory and selective FP32:**
 
 ```text
-device npm_pro {
-    spec_version = "NEM-1.0"
-    baseline     = "nem_baseline_1.0"
+include "nem_baseline_1.0.nem"
 
+device npm_pro extends nem_baseline_1_0 {
     topology {
         num_engines = 4
         per_engine {
@@ -782,7 +868,7 @@ device npm_pro {
 }
 ```
 
-Effective set: baseline MUST + `opcode.mandatory` BF16 + `opcode.extended` FP32 GEMM.
+Effective set: inherited MUST + `opcode.mandatory` BF16 + `opcode.extended` FP32 GEMM.
 
 **SKU extending base device with additional FP32 support:**
 
@@ -795,17 +881,17 @@ device npm_pro_x1 extends npm_pro {
 }
 ```
 
-Resolved `npm_pro_x1`: inherits all of `npm_pro`'s fields (spec_version, baseline,
-topology, `opcode.mandatory`). The `opcode.extended` set is the union of parent and
+Resolved `npm_pro_x1`: inherits all of `npm_pro`'s fields (spec_version, topology,
+`opcode.mandatory`). The `opcode.extended` set is the union of parent and
 child: `{ gemm.float<f32>.no_bias, conv2d.float<f32>.no_bias, eltwise<f32>.default }`.
 
 **Multi-file example:**
 
 ```text
 # file: devices/npm_pro.nem
-device npm_pro {
-    spec_version = "NEM-1.0"
-    baseline     = "nem_baseline_1.0"
+include "nem_baseline_1.0.nem"
+
+device npm_pro extends nem_baseline_1_0 {
     topology {
         num_engines = 4
         per_engine { NMU = 2  CSTL = 4  DMA = 4 }
@@ -1034,6 +1120,91 @@ Unbounded overlap is disallowed.
 
 ---
 
+## Constant Declarations (Normative)
+
+NEM programs describe static execution plans. All compile-time parameters — tensor
+dimensions, tile byte sizes, loop bounds — are integer constants known before execution.
+The `const` declaration introduces named constants into the program.
+
+### Syntax
+
+```text
+const ID = expr
+```
+
+A `const` declaration binds `ID` to the integer value of `expr`, evaluated at compile time.
+
+### Semantics
+
+1. **Immutability.** A `const` binding is immutable. The same identifier MUST NOT be
+   declared more than once. Duplicate `const` declarations are a static error.
+
+2. **Integer-valued.** All constants are integer-valued. No type annotation is required
+   or permitted — the type is always integer.
+
+3. **Constant expressions.** The right-hand side MUST be a **constant expression**: an
+   expression composed exclusively of:
+   - Integer literals (`INT`),
+   - Previously-declared constant names,
+   - The binary operators `+`, `-`, `*`, `/` (integer division), `mod`,
+   - Parenthesized sub-expressions.
+
+   The expression grammar for constant expressions is the same `expr` production used
+   elsewhere in NEM (see Formal Language Definition).
+
+4. **Evaluation order.** Constants are evaluated in declaration order. An `expr` in a
+   `const` declaration MUST NOT reference any identifier that has not been declared as a
+   `const` on a preceding line. Forward references are a static error.
+
+5. **Division semantics.** Integer division (`/`) truncates toward zero. Division by
+   zero in a constant expression is a static error.
+
+6. **Program scope.** Constants are program-scoped: they are visible from the point of
+   declaration to the end of the program, including inside loop bodies. However, `const`
+   declarations MUST NOT appear inside a `loop` body. A `const` inside a loop is a
+   static error. (Constants are iteration-invariant by definition; placing them inside
+   a loop would be misleading.)
+
+7. **Name uniqueness.** A `const` identifier MUST NOT conflict with any other identifier
+   in the same scope — including `let` bindings, buffer names, and token assignments.
+   Name conflicts are a static error.
+
+### Usage
+
+Constants may appear anywhere an `expr` is accepted in a NEM program:
+
+- Buffer sizes: `buffer X_L1 : L1 (size=2*tileX_bytes, align=64)`
+- Region offsets and extents: `region(X_L2, i * tileX_bytes, tileX_bytes)`
+- Shape dimensions: `shape=[1, TiH, TiW, Cin]`
+- Loop bounds: `loop i in [0..T-1]`
+- Compute attributes: `groups=1`, `accum_type=i32`
+
+### Example
+
+```text
+const TiH = 16
+const TiW = 16
+const Cin = 64
+const Cout = 128
+const Kh = 3
+const Kw = 3
+const ToH = 14
+const ToW = 14
+const T = 4
+
+const tileX_bytes = TiH * TiW * Cin        # 16384
+const tileW_bytes = Kh * Kw * Cin * Cout    # 294912
+const tileY_bytes = ToH * ToW * Cout        # 25088
+const bias_bytes = Cout * 4                 # i32 = 4 bytes per element
+
+buffer X_L2 : L2 (size=T * tileX_bytes, align=64)
+buffer W_L2 : L2 (size=tileW_bytes, align=64)
+buffer B_L2 : L2 (size=bias_bytes, align=64)
+buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
+```
+
+---
+
 ## Formal Language Definition (EBNF)
 
 ### Grammar
@@ -1050,7 +1221,8 @@ comment        ::= "#" { any_char_except_newline } NEWLINE ;
 (* --- Top Level --- *)
 
 document       ::= { include_decl } top_level ;
-top_level      ::= program | device_config ;
+top_level      ::= program | config_document ;
+config_document::= { type_family_decl | device_config } ;
 include_decl   ::= "include" STRING ;
 
 program        ::= device_decl? program_header? { stmt } ;
@@ -1059,7 +1231,8 @@ stmt           ::= decl | task | loop | ";" ;
 
 (* --- Declarations --- *)
 
-decl           ::= buffer_decl | region_decl | let_decl ;
+decl           ::= buffer_decl | region_decl | let_decl | const_decl ;
+const_decl     ::= "const" ID "=" expr ;
 let_decl       ::= "let" ID "=" value ;
 
 buffer_decl    ::= "buffer" ID ":" mem_level "(" buffer_props ")" decos? ;
@@ -1146,26 +1319,27 @@ unit_type      ::= "NMU" | "CSTL" | "DMA" ;
 
 **Document Model (Normative Note):**
 A NEM file is a `document` — a sequence of zero or more `include` declarations followed
-by exactly one top-level construct: either a `program` or a `device_config`. This means
-device configuration files and program files share the same document grammar but differ
-in their top-level content.
+by exactly one top-level construct: either a `program` or a `config_document`. A
+`config_document` may contain any mix of `type_family_decl` and `device_config`
+declarations. This means program files, device configuration files, and type family
+catalog files all share the same document grammar but differ in their top-level content.
 
 **Include Semantics (Normative):**
 
-1. An `include` declaration makes named device configurations from the referenced file
-   visible in the current file's scope.
+1. An `include` declaration makes named device configurations and type family
+   definitions from the referenced file visible in the current file's scope.
 2. The include path (a STRING literal) is resolved **relative to the directory of the
    including file**.
 3. Circular includes (A includes B includes A) are an error. Implementations MUST
    detect and reject circular include chains.
-4. Include is **textual name-resolution only** — it makes device identifiers available
-   for `extends` clauses and `device` directives. It does not perform textual
-   substitution or macro expansion.
+4. Include is **textual name-resolution only** — it makes device identifiers and type
+   family identifiers available for `extends` clauses, `device` directives, and type
+   family matching. It does not perform textual substitution or macro expansion.
 5. An included file MUST be a valid `document`. If the included file contains a
-   `program` (rather than a `device_config`), the program is ignored — only device
-   configurations are imported.
+   `program` (rather than a `config_document`), the program is ignored — only device
+   configurations and type family definitions are imported.
 6. Duplicate device identifiers (same name defined in multiple included files) are
-   an error.
+   an error. Duplicate type family identifiers are also an error.
 
 **Program Header (Normative Note):**
 A NEM program file contains exactly one program, terminated by end-of-file. The `program`
@@ -1412,6 +1586,57 @@ by binders targeting current NPM silicon.
 
 ---
 
+#### Implementation Priority (Informative)
+
+Beyond opcode-level hardware support, several NEM language features are defined for
+completeness but are not required for current NPM hardware generations. Implementations
+MAY defer these features to later stages. The following table classifies spec features
+by implementation priority:
+
+**Priority 1 — Required for current NPM hardware:**
+
+| Feature | Spec Section | Notes |
+|---------|-------------|-------|
+| `const` declarations | Constant Declarations | Required for self-contained, parseable programs |
+| Buffers, regions, tasks, tokens | Core Program Objects | Fundamental execution model |
+| `transfer.async/sync`, `store.async/sync`, `wait` | Task Taxonomy | Core data movement and synchronization |
+| `conv2d`, `gemm`/`matmul` | Compute Tasks | Supported on NMU |
+| Elementwise ops (`relu`, `add`, `mul`, etc.) | Compute Tasks | Supported on CSTL |
+| `maxpool`, `avgpool` | Compute Tasks | Supported on CSTL |
+| Layout/view ops (`transpose`, `reshape`, etc.) | Compute Tasks | Supported on CSTL/DMA |
+| `cast` (partial), store-path quantization | Type Conversion | Partial CSTL support |
+| `i4`, `i8`, `u8`, `f16`, `bf16` element types | Type System | Current NPM datapath widths |
+| MUST type family variants | Type Family Conformance | Listed in `opcode.mandatory` via baseline device |
+| Single-engine execution | Abstract Machine Model | Minimum viable configuration |
+| `@materialized`, `@readonly`, `@writeonly` | Decorators | Essential binder hints |
+| `@max_in_flight(N)`, loops | Loops and Bounded Pipelining | Required for tiled pipelines |
+| Device configuration (non-inherited) | Device Configuration | Single-device targeting |
+
+**Priority 2 — Defined, may be deferred to later implementation stages:**
+
+| Feature | Spec Section | Rationale for Deferral |
+|---------|-------------|----------------------|
+| `conv1d`, `conv3d`, `depthwise_conv2d` | Compute Tasks | No current NPM hardware support |
+| Reduction ops (`reduce_sum`, `argmax`, etc.) | Compute Tasks | No current NPM hardware support |
+| `quantize`, `dequantize` (as standalone ops) | Type Conversion | Only store-path quantization in hardware; standalone ops may require VPU |
+| `compute.async` generic escape hatch | Compute Tasks | Forward-compatibility mechanism only |
+| `i16`, `i32`, `u16`, `u32`, `f32` element types | Type System | MAY variants; not all devices support these widths natively |
+| MAY type family variants | Type Family Conformance | Device-dependent; not guaranteed |
+| Multi-engine execution (Engine `k > 0`) | Abstract Machine Model | Single-engine devices are the initial target |
+| Multi-NMU instances (`NMU[k > 0]`) | Execution Units | Future hardware capability |
+| `@resource` decorator | Decorators | Useful for multi-instance targets; single-instance binders assign freely |
+| `@deterministic` decorator | Decorators | Requires binder support for bitwise reproducibility |
+| `@memmove` decorator | Decorators | Rare use case; overlapping transfers uncommon |
+| `@debug`, `@profile` decorators | Decorators | Tooling support, not execution |
+| Device inheritance (`extends`) | Device Configuration | SKU differentiation; single-device configs sufficient initially |
+| `softmax` | Compute Tasks | Composite operation on current hardware |
+
+Implementations SHOULD prioritize Priority 1 features for initial bringup and conformance.
+Priority 2 features are fully specified and MUST be implemented to claim full NEM conformance,
+but MAY be deferred without affecting the ability to target current NPM hardware.
+
+---
+
 ### Type Family Grammar
 
 Type families formalize opcode type legality. A type family declares a parameterized
@@ -1425,7 +1650,7 @@ type_family_decl  ::= "type_family" family_id type_params? "{"
                         family_body
                       "}" ;
 
-family_id         ::= ID "." ID ;                     (* e.g. gemm.float, conv2d.int8 *)
+family_id         ::= ID ( "." ID )? ;                 (* e.g. gemm.float, conv2d.int8, eltwise, cast *)
 
 type_params       ::= "<" type_param { "," type_param } ">" ;
 type_param        ::= ID ":" "{" elem_type { "," elem_type } "}" ;
@@ -1478,16 +1703,18 @@ device_config          ::= "device" ID extends_clause? "{" config_body_or_ext "}
 extends_clause         ::= "extends" ID ;
 
 config_body_or_ext     ::= config_body                    (* base device *)
-                         | opcode_extended_block ;         (* derived device: only opcode.extended *)
+                         | derived_body ;                  (* derived device *)
 
 config_body            ::= spec_clause
-                           baseline_clause
-                           topology_block
+                           topology_block?
+                           opcode_mandatory_block
+                           opcode_extended_block? ;
+
+derived_body           ::= topology_block?
                            opcode_mandatory_block?
                            opcode_extended_block? ;
 
 spec_clause            ::= "spec_version" "=" STRING ;
-baseline_clause        ::= "baseline" "=" STRING ;
 
 topology_block         ::= "topology" "{"
                               "num_engines" "=" INT
@@ -1497,8 +1724,8 @@ unit_decl              ::= unit_type "=" INT ;
 
 opcode_mandatory_block ::= "opcode.mandatory" "{" { variant_ref } "}" ;
 opcode_extended_block  ::= "opcode.extended"  "{" { variant_ref } "}" ;
-variant_ref            ::= family_id type_instantiation "." ID ;
-                           (* e.g. gemm.float<bf16>.no_bias *)
+variant_ref            ::= family_id type_instantiation? "." ID ;
+                           (* e.g. gemm.float<bf16>.no_bias, cast.default *)
 ```
 
 `opcode.mandatory` and `opcode.extended` are compound keywords (lexed as single tokens).
@@ -1512,27 +1739,32 @@ blocks in device configurations.
 ### Device Inheritance (Normative)
 
 A device configuration may extend another device configuration via the `extends` clause.
-Inheritance enables SKU differentiation: a base device defines the common configuration
-and derived devices add to the `opcode.extended` set.
+Inheritance enables both SKU differentiation and baseline reuse: the standard baseline
+device (`nem_baseline_1_0`) defines MUST-class variants, and concrete devices extend it
+with topology and additional opcode support.
 
 **Inheritance Rules:**
 
-1. A derived device inherits **all** parent fields: `spec_version`, `baseline`,
-   `topology`, `opcode.mandatory`, and `opcode.extended`.
-2. The body of a derived device MUST contain **only** an `opcode.extended` block.
-   Any other field (spec_version, baseline, topology, opcode.mandatory) in a derived
-   device body is a parse error.
-3. The derived device's `opcode.extended` set is the **union** of the parent's
-   `opcode.extended` and the child's `opcode.extended`. Inheritance is additive only —
-   a child cannot remove variants from the parent.
-4. The parent device MUST be a concrete device (not forward-declared) and MUST be
-   defined before the child, either in the same file or made visible via `include`.
-5. Multi-level inheritance is permitted (A extends B extends C). Single parent only —
+1. A derived device inherits **all** parent fields: `spec_version`, `topology`,
+   `opcode.mandatory`, and `opcode.extended`.
+2. A derived device body (`derived_body`) MAY contain any combination of:
+   `topology`, `opcode.mandatory`, and/or `opcode.extended`. A derived device
+   MUST NOT specify `spec_version` — it is always inherited from the parent.
+3. **Topology**: If a derived device specifies a `topology` block, it **replaces**
+   the parent's topology. If the parent has no topology (abstract device), the
+   derived device MUST provide one.
+4. **`opcode.mandatory`**: The resolved `opcode.mandatory` set is the **union** of
+   the parent's and child's `opcode.mandatory`. Inheritance is additive only — a
+   child cannot remove variants from the parent.
+5. **`opcode.extended`**: The resolved `opcode.extended` set is the **union** of
+   the parent's and child's `opcode.extended`. Inheritance is additive only.
+6. The parent device MUST be defined before the child, either in the same file or
+   made visible via `include`. The parent MAY be an abstract device (no topology).
+   Multi-level inheritance is permitted (A extends B extends C). Single parent only —
    multiple inheritance is not supported.
-6. The resolved device is the parent's full configuration with the child's
-   `opcode.extended` variants appended to the parent's `opcode.extended` set.
-7. The `opcode.mandatory ∩ opcode.extended` disjointness rule (Schema Rule 6) applies
-   to the **resolved** device, not just to individual declarations.
+7. **Resolution validity**: After inheritance resolution, the resolved device MUST
+   satisfy all Schema Rules: topology MUST be present, `opcode.mandatory` MUST be
+   non-empty, and `opcode.mandatory ∩ opcode.extended` MUST be empty.
 
 ### Program Device Directive
 
@@ -1569,6 +1801,51 @@ Examples included:
   plus generator rule).
 - **Multi-CSTL Pipeline with @resource** — intra-engine parallelism across 4 CSTL
   instances, explicit resource binding, and graceful degradation on smaller devices.
+
+---
+
+## Restructuring Recommendations (Informative)
+
+The following observations identify places where the current document order introduces
+concepts before their formal definition. These are recommendations for a future
+editorial revision and do not affect the normative content of this specification.
+
+**1. Move "Design Principle: Object Attributes vs. Decorators" before "Core Program Objects".**
+
+The distinction between attributes and decorators is foundational — it determines how
+readers interpret every region and task definition. Currently it appears after the
+full Task Taxonomy. Moving it earlier (between "Abstract Machine Model" and "Core
+Program Objects") would allow the Regions and Tasks sections to reference the
+principle without a forward jump.
+
+**2. Introduce a brief "Decorators (Overview)" section before the Task Taxonomy.**
+
+The Regions section references `@materialized` and `@readonly` before decorators
+are formally defined. A short overview (2–3 paragraphs listing decorator categories
+with one-line descriptions) placed after Core Program Objects would provide
+sufficient context. The full Decorators section with normative semantics would
+remain in its current position.
+
+**3. Move "Device Configuration" into its own top-level section before the Task Taxonomy.**
+
+The Execution Units section references the device configuration (instance counts),
+and the Type Family Conformance section depends on it heavily. Currently, device
+configuration is buried inside the Formal Language Definition (grammar section).
+Extracting it into a standalone section would reduce forward references and make
+the device model easier to find.
+
+**4. Consolidate the Type System and Extent Consistency sections.**
+
+The Extent Consistency section currently sits between the Type System and the
+Task Taxonomy. Since it directly depends on type system concepts (`bitwidth(E)`,
+`elem`, `shape`), it would read more naturally as a subsection within the Type
+System.
+
+**5. Define "import" semantics for buffers.**
+
+The buffer attribute list references an "import flag" but does not define the
+associated semantics (ownership, mutability, lifetime constraints). A brief
+subsection under Buffers or a dedicated paragraph would close this gap.
 
 ---
 

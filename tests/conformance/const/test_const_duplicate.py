@@ -1,0 +1,21 @@
+"""
+Conformance: Constant Declarations - duplicate declaration errors
+Spec reference: Constant Declarations
+"""
+import pytest
+
+
+# Each test case is a tuple: (description, nem_source, expected_outcome)
+# expected_outcome is either "valid" or "error: <description>"
+
+CASES = [
+    ("duplicate_const", "const X = 1\nconst X = 2", "error: duplicate constant declaration X"),
+    ("duplicate_different_values", "const X = 10\nconst Y = 20\nconst X = 30", "error: duplicate constant declaration X"),
+]
+
+
+@pytest.mark.parametrize("description,source,expected", CASES, ids=[c[0] for c in CASES])
+def test_const_duplicate(description, source, expected):
+    """Duplicate constant declarations are errors."""
+    # Conformance specification — to be wired to parser/semantic checker
+    pass

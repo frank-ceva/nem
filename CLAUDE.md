@@ -9,6 +9,8 @@ You are working in a monorepo that defines a language and its toolchain:
 - simulator
 - shared tests and infrastructure
 
+You MUST comply with guidelines defined in @work_instructions.md (if you are running at the top directory, i.e. dealing with the spec and integration, replace work.md by spec-int-work.md) and @tools/tools_instructions.md and also enforce engineering process defined in the engineering directory, using @docs/engineering/README.md as an entry point.
+
 ## Core Principles
 
 - Keep changes within your assigned component scope.
@@ -21,6 +23,7 @@ You are working in a monorepo that defines a language and its toolchain:
 - Run tool-local tests for your component.
 - Add conformance tests for semantic behavior changes.
 
-## Software engineering
+## References
 
 See `docs/engineering/README.md` for operational guidance.
+See `docs/ext/README.md`for external documentation needed to design NEM specifications and software

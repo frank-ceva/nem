@@ -1,0 +1,112 @@
+# Conv2D + MaxPool — Multi-Op Tiled Pipeline
+#
+# A two-stage pipeline common in classification networks
+# (e.g. ResNet, VGG).  Each tile goes through convolution
+# and then spatial down-sampling via max-pooling before
+# the result is stored back to L2.
+#
+# Y = MaxPool(Conv2D(X, W))
+#   X : [1, TiH, TiW, Cin]    input activation   (i8)
+#   W : [Kh, Kw, Cin, Cout]   weights            (i8)
+#   Y : [1, ToH_p, ToW_p, Cout]  output          (i8)
+#
+# Key concepts illustrated:
+#   - Chaining two different compute opcodes (conv2d → maxpool)
+#   - @materialized on the intermediate (conv output) to prevent
+#     the binder from fusing away the boundary
+#   - Token dependencies threading through the full pipeline
+
+device "npm_lite.cfg"
+
+program conv2d_maxpool:
+
+# --- Compile-time constants ---
+const TiH = 16
+const TiW = 16
+const Cin = 64
+const Cout = 128
+const Kh = 3
+const Kw = 3
+const ToH = 14
+const ToW = 14
+const ToH_p = 7                              # pooled output height (ToH / 2)
+const ToW_p = 7                              # pooled output width  (ToW / 2)
+const T = 4
+
+const tileX_bytes = TiH * TiW * Cin         # 16384
+const tileW_bytes = Kh * Kw * Cin * Cout     # 294912
+const tileC_bytes = ToH * ToW * Cout         # 25088 (conv output)
+const tileY_bytes = ToH_p * ToW_p * Cout     # 6272  (pooled output)
+
+# ── L2: full tensors ──────────────────────────────────
+buffer X_L2 : L2 (size=T * tileX_bytes, align=64)
+buffer W_L2 : L2 (size=tileW_bytes, align=64)
+buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
+
+# ── L1: working tiles ────────────────────────────────
+buffer X_L1 : L1 (size=2*tileX_bytes, align=64)
+buffer W_L1 : L1 (size=tileW_bytes,   align=64)
+buffer C_L1 : L1 (size=2*tileC_bytes, align=64)   # conv output / pool input
+buffer Y_L1 : L1 (size=2*tileY_bytes, align=64)
+
+loop i in [0..T-1] @max_in_flight(2):
+
+  # L2 source / destination
+  let X_tile_i = region(X_L2, i * tileX_bytes, tileX_bytes)
+                 elem=i8, shape=[1, TiH, TiW, Cin], layout=NHWC
+
+  let Y_tile_i = region(Y_L2, i * tileY_bytes, tileY_bytes)
+                 elem=i8, shape=[1, ToH_p, ToW_p, Cout], layout=NHWC
+                 @materialized
+
+  # L1 ping-pong slots
+  let X_pp_i = region(X_L1, (i mod 2)*tileX_bytes, tileX_bytes)
+               elem=i8, shape=[1, TiH, TiW, Cin], layout=NHWC
+
+  # Intermediate: conv output, marked @materialized so the binder
+  # keeps it as a real value boundary between conv2d and maxpool.
+  let C_pp_i = region(C_L1, (i mod 2)*tileC_bytes, tileC_bytes)
+               elem=i8, shape=[1, ToH, ToW, Cout], layout=NHWC
+               @materialized
+
+  let Y_pp_i = region(Y_L1, (i mod 2)*tileY_bytes, tileY_bytes)
+               elem=i8, shape=[1, ToH_p, ToW_p, Cout], layout=NHWC
+               @materialized
+
+  # Weights (shared across tiles)
+  let W_l1 = region(W_L1, 0, tileW_bytes)
+             elem=i8, shape=[Kh, Kw, Cin, Cout], layout=HWIO
+
+  # ── DMA prefetch ──────────────────────────────────
+  tX = transfer.async(dst=X_pp_i, src=X_tile_i)
+  tW = transfer.async(
+         dst=W_l1,
+         src=region(W_L2, 0, tileW_bytes)
+             elem=i8, shape=[Kh, Kw, Cin, Cout], layout=HWIO
+       )
+  wait(tX, tW)
+
+  # ── Stage 1: Convolution ──────────────────────────
+  tC = conv2d.async
+         in  X_pp_i, W_l1
+         out C_pp_i
+         deps=[tX, tW]
+         pads=[1,1,1,1]
+         strides=[1,1]
+         dilations=[1,1]
+         groups=1
+         accum_type=i32
+
+  # ── Stage 2: Spatial down-sampling ────────────────
+  tP = maxpool.async
+         in  C_pp_i
+         out Y_pp_i @materialized
+         deps=[tC]
+         kernel_shape=[2,2]
+         pads=[0,0,0,0]
+         strides=[2,2]
+
+  # ── Store result back to L2 ───────────────────────
+  tS = store.async(dst=Y_tile_i, src=Y_pp_i, deps=[tP])
+
+endloop

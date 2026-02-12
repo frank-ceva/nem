@@ -1,0 +1,26 @@
+# NPM Lite — Device Configuration
+#
+# This file defines a minimal NPU device configuration that extends
+# the nem_baseline_1.0 type families and declares additional mandatory
+# opcode variants beyond the baseline MUST requirements.
+
+include "npm_baseline_1.0.nem"
+
+device npm_lite extends npm_baseline_1_0 {
+    topology {
+        num_engines = 1
+        per_engine {
+            NMU  = 1
+            CSTL = 2
+            DMA  = 2
+        }
+    }
+
+    # MAY variants this device guarantees beyond the baseline
+    opcode.mandatory {
+        conv2d.int8<i16>.with_bias
+        eltwise<i32>.default
+        dequantize<i8, f32>.default
+    }
+}
+
