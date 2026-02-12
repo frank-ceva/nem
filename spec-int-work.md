@@ -1,10 +1,5 @@
 This file lists all major work items to be worked on, or currently being worked on, in priority order: the upper one is the first to work on.
 
-# Multi-agent workflow
-I am currently defining a multi-agent workflow that will enable concurrent engineering of multiple Claude Code sesions in parallel.
-For this purpose, I have created an ./engineering directory that defines this workflow but it needs refinment, review and validation before we start using it.
-At high level, 
-
 # NEM interpreter
 **Current phase: Architecture spec written** — see [tools/interpreter/interpreter_spec.md](tools/interpreter/interpreter_spec.md)
 
