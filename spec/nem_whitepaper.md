@@ -20,7 +20,11 @@ A critical gap is a **proper architectural execution model** tailored to NeuPro-
 - Communication between hardware and software teams is difficult, because there is no common "language" / abstract view of the main hardware mechanisms. Specifically, only a handful of software engineers have an in-depth understanding of the NPM hardware, while many more need to understand it to develop software. Conversly, hardware architects need to understand impact of their micro-architecture across many layers of the software stack, given that there is no "isolation" layer keeping micro-architecture optimization hidden from upper software layers
 - Without a well-defined architecture spec (separate from micro-architecture), any hardware change may impact multiple software layers, not only with respect to performance, but also functional correctness. It is also difficult for software architects to understand which software layers are impacted by a hardware evolution
 
-NEM (NeuPro-M Execution Model) is introduced to fill this gap, as an intermediate abstraction. The overall stack looks like this: ONNX (and/or other) -> MLIR -> NEM -> TCB.
+NEM (NeuPro-M Execution Model) is introduced to fill this gap, as an intermediate abstraction. The overall stack looks like this: ONNX (and/or other) -> MLIR -> NEM -> TCB. 
+
+Note that although NEM's current specification is in the form of a language specification, it is possible, and in fact, expected, that NEM will have multiple implementations besides the language format:
+- an MLIR dialect so that a graph compiler can lower representations to NEM and then simply emit code
+- a bytecode representation. Using this representation, it becomes possible ship binaries of pre-compiled NEM codes, with the ability to convert them to TCBs later (similar to PTX)
 
 NEM's main benefits are:
 - A well-defined architecture abstraction layer suitable for programming the NPM hardware. The level of abstraction is :

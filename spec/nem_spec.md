@@ -125,20 +125,55 @@ quantity, or topology. Mapping to concrete hardware units is expressed via Execu
 ### Execution Units
 
 The abstract machine defines named **execution unit types** that represent physically distinct
-hardware blocks within an Engine:
+hardware blocks. Execution units are classified into two categories based on their scope:
+
+#### Per-Engine Execution Units
+
+Each Engine contains one or more instances of the following unit types:
 
 | Unit Type | Role | Typical Instances/Engine |
 |-----------|------|------------------------|
 | `NMU` | Linear algebra (GEMM, Conv, MatMul) | 1 (future: N) |
 | `CSTL` | Elementwise, activation, normalization, store-back | 1–4 |
-| `DMA` | Region transfers between memory levels | 1–4 |
+| `DMA` | Region transfers between memory levels (L2↔L1) | 1–4 |
+| `VPU` | Programmable vector/scalar operations, control logic, fallback execution | 1 |
+| `SEQ` | Task dispatch and synchronization (Sequencer) | 1 |
 
-Each Engine contains one or more instances of each unit type.
-Instances are identified by a zero-based index within their type and Engine:
-`NMU[0]`, `CSTL[0]`..`CSTL[3]`, `DMA[0]`..`DMA[3]`.
+Per-engine instances are identified by a zero-based index within their type and Engine:
+`NMU[0]`, `CSTL[0]`..`CSTL[3]`, `DMA[0]`..`DMA[3]`, `VPU[0]`, `SEQ[0]`.
 
-The number of instances per unit type per Engine is declared in the device configuration
-(see Device Configuration Grammar and Device Configuration in the Formal Language Definition).
+The number of instances per unit type per Engine is declared in the `per_engine` block of
+the device configuration (see Device Configuration Grammar in the Formal Language Definition).
+
+#### Device-Level Execution Units
+
+The following unit types exist at the *device level* (not per-engine) and are shared
+across all Engines:
+
+| Unit Type | Role | Typical Instances/Device |
+|-----------|------|-------------------------|
+| `sDMA` | System DMA: region transfers between DDR and L2 | 1–4 |
+| `WDM` | Weight Decompression Module: on-the-fly weight decompression | 0–8 |
+
+Device-level units are declared in the `device_units` block of the device configuration.
+A count of 0 means the unit type is not present on this device.
+
+The `sDMA` (System DMA) is architecturally distinct from the engine-level `DMA`:
+- `sDMA` handles data movement between DDR and L2 (device-level, shared)
+- `DMA` handles data movement between L2 and L1 (engine-level, local)
+
+The binder selects the appropriate DMA path based on the memory levels of the source
+and destination regions in a transfer task. NEM programs express *what* transfer happens;
+the binder decides *which* DMA path is used.
+
+The `WDM` (Weight Decompression Module) enables on-the-fly decompression of compressed
+weight data during DDR→L2 or L2→L1 transfers. WDM supports compression modes including
+weight sharing, sparse compression, and 4/8-bit compression. When WDM instances are
+present (count > 0), the binder MAY route weight transfers through WDM for compressed
+data paths. When WDM is absent (count = 0), the binder MUST use uncompressed DMA paths
+for all weight transfers.
+
+#### Resource Classes and Task Mapping
 
 **Execution units are orthogonal to resource classes.**
 Resource classes (COMPUTE, TRANSFER, STORE) describe *what an operation does*:
@@ -148,9 +183,16 @@ Execution units describe *where an operation runs* on the hardware.
 The mapping from task types to eligible execution unit types is:
 
 - Linear algebra operations (`gemm`, `matmul`, `conv*`) → `NMU`
-- Elementwise and activation operations (`relu`, `add`, `mul`, `softmax`, ...) → `CSTL`
+- Elementwise and activation operations (`relu`, `add`, `mul`, `gelu`, `silu`, `softmax`, ...) → `CSTL`
+- Normalization operations (`layernorm`, `rmsnorm`) → `CSTL`
 - Store operations (`store.async`, `store.sync`) → `CSTL`
-- Transfer operations (`transfer.async`, `transfer.sync`) → `DMA`
+- Transfer operations (`transfer.async`, `transfer.sync`) → `DMA` (L2↔L1) or `sDMA` (DDR↔L2)
+- Quantize/dequantize (standalone) → `VPU`
+- Reduction operations → `VPU`
+- Operations not supported by NMU or CSTL → `VPU` (fallback)
+
+`SEQ` is the sequencer — it dispatches tasks and manages synchronization tokens. It is
+NOT a task execution target. Programs MUST NOT reference `SEQ` as an execution target.
 
 A given operation MAY be eligible for multiple unit types on future devices.
 
@@ -321,10 +363,22 @@ Layouts are semantic; binders may remap layouts if semantics are preserved.
 
 ### Quantization Descriptor
 
-Optional quantization metadata MAY be attached:
+Optional quantization metadata MAY be attached to a region via the `quant` attribute.
+Three forms are supported (see `quant_desc` production in the Formal Language Definition):
 
-- per-tensor: `(scale, zero_point)`
-- per-channel: `(axis, scales[], zero_points[])`
+- **per-tensor:** `per_tensor(scale=<value>, zero_point=<value>)` — a single scale and
+  zero point apply to the entire tensor.
+- **per-channel:** `per_channel(axis=<INT>, scales=[...], zero_points=[...])` — per-element
+  scale and zero point along the specified axis. `scales` and `zero_points` arrays MUST
+  have length equal to `dim[axis]`.
+- **per-group:** `per_group(axis=<INT>, group_size=<INT>, scales=[...], zero_points=[...])` —
+  groups of `group_size` elements along `axis` share a common scale and zero point.
+  `scales` and `zero_points` arrays MUST have length `⌈dim[axis] / group_size⌉`.
+  `group_size` MUST be a positive integer. If `dim[axis]` is not evenly divisible by
+  `group_size`, the last group contains fewer elements; the binder handles any padding.
+
+Per-group quantization is the dominant format for INT4 LLM weight compression (e.g.,
+groups of 32 or 128 elements sharing a scale factor).
 
 Quantization semantics MUST be preserved by binders.
 
@@ -544,7 +598,7 @@ Typing rules:
 - Explicit type conversion only.
 - No implicit casts are permitted elsewhere in NEM.
 
-WARNING: NPM does not embedded dedicated hardware operators implementing quantization operations, other than CSTL's capability to store data and apply some quantization on-the-fly. Quantization operators, if needed, MAY be implemented on VPU.
+WARNING: NPM does not embed dedicated hardware operators implementing quantization operations, other than CSTL's capability to store data and apply some quantization on-the-fly. Standalone quantization operators, if needed, MAY be implemented on `VPU` (see Execution Units). The `VPU` is a declared per-engine execution unit type and a valid `@resource` target.
 
 ---
 
@@ -639,6 +693,8 @@ inheritance from the standard baseline device `nem_baseline_1_0`).
 | | `eltwise<f16>.default` | `relu`, `add`, `mul`, ... |
 | View / Layout | `view<i8>.default` | `transpose`, `reshape`, ... |
 | | `view<f16>.default` | `transpose`, `reshape`, ... |
+| Normalization | `norm<f16>.default` | `layernorm`, `rmsnorm` |
+| Softmax | `softmax<f16>.default` | `softmax`, `log_softmax` |
 | Type Conversion | `cast.default` | `cast` |
 | | `quantize<f16, i8>.default` | `quantize` |
 | | `dequantize<i8, f16>.default` | `dequantize` |
@@ -673,6 +729,14 @@ Devices advertise support for zero or more of these via their `opcode.mandatory`
 | | `view<i32>.default` | view ops |
 | | `view<bf16>.default` | view ops |
 | | `view<f32>.default` | view ops |
+| Normalization | `norm<bf16>.default` | `layernorm`, `rmsnorm` |
+| | `norm<f32>.default` | `layernorm`, `rmsnorm` |
+| Softmax | `softmax<bf16>.default` | `softmax`, `log_softmax` |
+| | `softmax<f32>.default` | `softmax`, `log_softmax` |
+| Linear Algebra (INT4) | `gemm.int4.no_bias` | `gemm` / `matmul` |
+| | `gemm.int4.with_bias` | `gemm` / `matmul` |
+| Convolution (INT4) | `conv2d.int4.no_bias` | `conv2d` |
+| | `conv2d.int4.with_bias` | `conv2d` |
 | Type Conversion | `quantize<f32, i8>.default` | `quantize` |
 | | `dequantize<i8, f32>.default` | `dequantize` |
 
@@ -714,9 +778,16 @@ section of the Formal Language Definition.
 4. `opcode.mandatory ∩ opcode.extended` MUST be empty. A variant MUST NOT appear in
    both blocks. A binder encountering a duplicate SHOULD emit a diagnostic warning
    and MUST ignore the redundant entry.
-5. All topology fields MUST be ≥ 1. After device resolution (including inheritance),
-   a `topology` block MUST be present.
-6. After device resolution (including inheritance), `opcode.mandatory` MUST include
+5. All per-engine unit counts and `num_engines` MUST be ≥ 1. Device-level unit
+   counts (`device_units`) MAY be 0 (meaning the unit type is absent).
+   `l1_size_bytes` and `l2_size_bytes` MUST be > 0.
+   After device resolution (including inheritance), a `topology` block MUST be
+   present.
+6. **Memory capacity rule**: The sum of all buffer sizes declared at a given memory
+   level MUST NOT exceed the declared capacity for that level (`l1_size_bytes` for
+   L1, `l2_size_bytes` for L2). For single-engine programs this is a static check;
+   for multi-engine scheduling the binder is responsible for enforcement.
+7. After device resolution (including inheritance), `opcode.mandatory` MUST include
    every MUST-class family variant instantiation defined by the spec revision
    identified in `spec_version`. A resolved device whose `opcode.mandatory` set
    does not contain all MUST variants is invalid.
@@ -795,10 +866,28 @@ include "nem_baseline_1.0.nem"
 device npm_lite extends nem_baseline_1_0 {
     topology {
         num_engines = 1
+        l2_size_bytes = 1048576          # 1 MB L2
+        device_units {
+            sDMA = 1
+            WDM  = 0                     # no weight decompression
+        }
         per_engine {
             NMU  = 1
             CSTL = 2
             DMA  = 2
+            VPU  = 1
+            SEQ  = 1
+            l1_size_bytes = 524288       # 512 KB L1
+        }
+    }
+
+    unit_characteristics {
+        NMU {
+            int8_macs = 4096
+            fp16_macs = 2048
+        }
+        SEQ {
+            max_active_tokens = 16
         }
     }
 
@@ -820,10 +909,30 @@ include "nem_baseline_1.0.nem"
 device npm_mid extends nem_baseline_1_0 {
     topology {
         num_engines = 2
+        l2_size_bytes = 4194304          # 4 MB L2
+        device_units {
+            sDMA = 2
+            WDM  = 2
+        }
         per_engine {
             NMU  = 1
             CSTL = 2
             DMA  = 2
+            VPU  = 1
+            SEQ  = 1
+            l1_size_bytes = 1048576      # 1 MB L1
+        }
+    }
+
+    unit_characteristics {
+        NMU {
+            int4_macs = 16384
+            int8_macs = 4096
+            int16_macs = 1024
+            fp16_macs = 2048
+        }
+        SEQ {
+            max_active_tokens = 16
         }
     }
 
@@ -847,10 +956,30 @@ include "nem_baseline_1.0.nem"
 device npm_pro extends nem_baseline_1_0 {
     topology {
         num_engines = 4
+        l2_size_bytes = 8388608          # 8 MB L2
+        device_units {
+            sDMA = 4
+            WDM  = 4
+        }
         per_engine {
             NMU  = 2
             CSTL = 4
             DMA  = 4
+            VPU  = 1
+            SEQ  = 1
+            l1_size_bytes = 1048576      # 1 MB L1
+        }
+    }
+
+    unit_characteristics {
+        NMU {
+            int4_macs = 32768
+            int8_macs = 8192
+            int16_macs = 2048
+            fp16_macs = 4096
+        }
+        SEQ {
+            max_active_tokens = 32
         }
     }
 
@@ -882,8 +1011,8 @@ device npm_pro_x1 extends npm_pro {
 ```
 
 Resolved `npm_pro_x1`: inherits all of `npm_pro`'s fields (spec_version, topology,
-`opcode.mandatory`). The `opcode.extended` set is the union of parent and
-child: `{ gemm.float<f32>.no_bias, conv2d.float<f32>.no_bias, eltwise<f32>.default }`.
+`unit_characteristics`, `opcode.mandatory`). The `opcode.extended` set is the union of
+parent and child: `{ gemm.float<f32>.no_bias, conv2d.float<f32>.no_bias, eltwise<f32>.default }`.
 
 **Multi-file example:**
 
@@ -894,7 +1023,16 @@ include "nem_baseline_1.0.nem"
 device npm_pro extends nem_baseline_1_0 {
     topology {
         num_engines = 4
-        per_engine { NMU = 2  CSTL = 4  DMA = 4 }
+        l2_size_bytes = 8388608
+        device_units { sDMA = 4  WDM = 4 }
+        per_engine {
+            NMU = 2  CSTL = 4  DMA = 4  VPU = 1  SEQ = 1
+            l1_size_bytes = 1048576
+        }
+    }
+    unit_characteristics {
+        NMU { int4_macs = 32768  int8_macs = 8192  fp16_macs = 4096 }
+        SEQ { max_active_tokens = 32 }
     }
     opcode.mandatory {
         gemm.float<bf16>.no_bias
@@ -1030,6 +1168,17 @@ executes correctly with any or all decorators removed (see Design Principle abov
   Constrains the binder to assign this task to the specified execution unit instance
   on the task's assigned Engine. Binding follows the Target Resource Validity Rule.
   When absent, the binder assigns freely. See Execution Units.
+
+  **Resource-invalid unit types (Normative):** The following unit types are NOT valid
+  `@resource` targets:
+  - `SEQ` — control plane unit; dispatches tasks, not a compute or transfer unit.
+  - `sDMA` — device-level unit; the binder selects sDMA vs engine DMA based on the
+    memory levels involved in a transfer.
+  - `WDM` — device-level unit; a transparent data-path modifier for compressed weight
+    transfers, not directly schedulable.
+
+  Programs MUST NOT use `@resource` with these unit types; such usage is a static error.
+  Valid `@resource` targets are: `NMU`, `CSTL`, `DMA`, `VPU`.
 
 Unknown semantic decorators are errors.
 
@@ -1213,10 +1362,17 @@ buffer Y_L2 : L2 (size=T * tileY_bytes, align=64)
 (* --- Lexical --- *)
 
 comment        ::= "#" { any_char_except_newline } NEWLINE ;
+FLOAT          ::= DIGIT+ "." DIGIT+ ( [eE] [+-]? DIGIT+ )? ;
 
 (* Comments begin with '#' and extend to end of line.
    They may appear on their own line or after any token.
-   Comments are stripped before parsing. *)
+   Comments are stripped before parsing.
+
+   FLOAT literals consist of one or more digits, a decimal point, one or more
+   fractional digits, and an optional scientific-notation exponent (e.g., 1.0,
+   0.00001, 1.0e-5).  FLOAT literals are permitted only in compute attribute
+   values (e.g., epsilon, alpha).  Buffer sizes, region offsets/extents, shape
+   dimensions, loop bounds, and const declarations remain integer-only. *)
 
 (* --- Top Level --- *)
 
@@ -1248,6 +1404,15 @@ type_attrs     ::= "elem" "=" elem_type ","
 elem_type      ::= "i4" | "i8" | "i16" | "i32"
                   | "u8" | "u16" | "u32"
                   | "f16" | "bf16" | "f32" ;
+
+quant_desc     ::= per_tensor_quant | per_channel_quant | per_group_quant ;
+per_tensor_quant  ::= "per_tensor" "(" "scale" "=" value "," "zero_point" "=" value ")" ;
+per_channel_quant ::= "per_channel" "(" "axis" "=" INT ","
+                       "scales" "=" "[" value_list "]" ","
+                       "zero_points" "=" "[" value_list "]" ")" ;
+per_group_quant   ::= "per_group" "(" "axis" "=" INT "," "group_size" "=" INT ","
+                       "scales" "=" "[" value_list "]" ","
+                       "zero_points" "=" "[" value_list "]" ")" ;
 
 mem_level      ::= "DDR" | "L2" | L1_indexed ;
 L1_indexed     ::= "L1" ( "[" expr "]" )? ;
@@ -1300,7 +1465,7 @@ id_list        ::= ID { "," ID } ;
 (* --- Expressions --- *)
 
 expr           ::= primary { binop primary } ;
-primary        ::= INT | ID | "(" expr ")" ;
+primary        ::= INT | FLOAT | ID | "(" expr ")" ;
 binop          ::= "+" | "-" | "*" | "/" | "mod" ;
 
 (* --- Values --- *)
@@ -1314,7 +1479,8 @@ decos          ::= { deco } ;
 deco           ::= "@" ID ( "(" deco_args ")" )? ;
 deco_args      ::= value { "," value }
                   | unit_type "[" expr "]" ;           (* for @resource *)
-unit_type      ::= "NMU" | "CSTL" | "DMA" ;
+unit_type      ::= "NMU" | "CSTL" | "DMA" | "VPU" | "SEQ"
+                  | "sDMA" | "WDM" ;
 ```
 
 **Document Model (Normative Note):**
@@ -1352,214 +1518,29 @@ execution semantics — it does not affect scheduling, binding, or device validi
 
 ### Opcode Signatures (Normative)
 
-This section defines the formal operand structure and attributes for each opcode.
-The `OPCODE` terminal in the grammar matches one of the opcodes listed below.
+The formal operand structure and attributes for each NEM opcode are defined in the
+**Opcode Registry** (`spec/registry/opcodes.yaml`). The registry is the single source of
+truth for opcode signatures and is referenced normatively by this specification.
 
-Operand roles:
-- Operands listed as **required** MUST be present.
-- Operands listed as **optional** (in brackets `[]`) MAY be omitted.
+The `OPCODE` terminal in the grammar matches one of the opcodes listed in the registry.
+
+For each opcode, the registry defines:
+
+- **Operands:** name, direction (in/out), required/optional, role, and shape/rank constraints.
+- **Attributes:** name, value type, required/optional, and defaults.
+- **Type families:** references to the type family definitions that govern type legality.
+- **Execution unit:** primary NPM hardware unit (NMU, CSTL, DMA, etc.).
+- **Hardware status:** current NPM hardware support level.
+- **Status:** whether the opcode is stable, provisional, or planned for future hardware.
+
+Operand rules:
+- Operands marked **required** in the registry MUST be present in a NEM program.
+- Operands marked **optional** MAY be omitted.
 - All required attributes MUST be specified; optional attributes have stated defaults.
 
-#### Linear Algebra
-
-##### `gemm` / `matmul`
-
-```text
-gemm.async
-    in   A, B [, C]
-    out  Y
-    accum_type = <elem_type>          // required
-```
-
-| Operand | Role | Notes |
-|---------|------|-------|
-| `A` | Input activation | Rank ≥ 2 |
-| `B` | Weights / second operand | Rank ≥ 2, inner dims must match A |
-| `C` | Bias / addend (optional) | Broadcastable to Y shape |
-| `Y` | Output | Shape derived from A, B dims |
-
-Required attributes: `accum_type`.
-
-#### Convolution
-
-##### `conv2d`
-
-```text
-conv2d.async
-    in   X, W [, B]
-    out  Y
-    pads       = [pad_top, pad_left, pad_bottom, pad_right]
-    strides    = [stride_h, stride_w]
-    dilations  = [dilation_h, dilation_w]
-    groups     = <INT>                // default: 1
-    accum_type = <elem_type>          // required
-```
-
-| Operand | Role | Notes |
-|---------|------|-------|
-| `X` | Input activation | Rank 4, layout NHWC |
-| `W` | Weights | Rank 4, layout HWIO |
-| `B` | Bias (optional) | Rank 1, shape [Cout] |
-| `Y` | Output | Shape derived from X, W, pads, strides, dilations, groups |
-
-Required attributes: `pads`, `strides`, `dilations`, `accum_type`.
-Optional attributes: `groups` (default 1).
-
-##### `conv1d`
-
-```text
-conv1d.async
-    in   X, W [, B]
-    out  Y
-    pads       = [pad_left, pad_right]
-    strides    = [stride_w]
-    dilations  = [dilation_w]
-    groups     = <INT>                // default: 1
-    accum_type = <elem_type>          // required
-```
-
-Operand roles follow the same pattern as `conv2d` with rank reduced by one.
-
-##### `conv3d`
-
-```text
-conv3d.async
-    in   X, W [, B]
-    out  Y
-    pads       = [pad_d0, pad_h0, pad_w0, pad_d1, pad_h1, pad_w1]
-    strides    = [stride_d, stride_h, stride_w]
-    dilations  = [dilation_d, dilation_h, dilation_w]
-    groups     = <INT>                // default: 1
-    accum_type = <elem_type>          // required
-```
-
-Operand roles follow the same pattern as `conv2d` with rank increased by one.
-
-##### `depthwise_conv2d`
-
-```text
-depthwise_conv2d.async
-    in   X, W [, B]
-    out  Y
-    pads       = [pad_top, pad_left, pad_bottom, pad_right]
-    strides    = [stride_h, stride_w]
-    dilations  = [dilation_h, dilation_w]
-    accum_type = <elem_type>          // required
-```
-
-Equivalent to `conv2d` with `groups = Cin` (each input channel convolved independently).
-
-#### Elementwise
-
-##### Unary Operations
-
-```text
-relu.async          in X    out Y
-leaky_relu.async    in X    out Y    alpha = <FLOAT>
-sigmoid.async       in X    out Y
-tanh.async          in X    out Y
-exp.async           in X    out Y
-log.async           in X    out Y
-sqrt.async          in X    out Y
-abs.async           in X    out Y
-neg.async           in X    out Y
-```
-
-Input and output shapes MUST be identical. Element types MUST match.
-`leaky_relu` requires the `alpha` attribute (slope for negative values).
-
-##### Binary Operations
-
-```text
-add.async     in A, B    out Y
-sub.async     in A, B    out Y
-mul.async     in A, B    out Y
-div.async     in A, B    out Y
-min.async     in A, B    out Y
-max.async     in A, B    out Y
-pow.async     in A, B    out Y
-```
-
-A and B shapes MUST be identical (no implicit broadcasting).
-Element types of A, B, and Y MUST match.
-
-##### Other
-
-```text
-clamp.async   in X    out Y    min_val = <value>    max_val = <value>
-```
-
-#### Pooling
-
-##### `maxpool` / `avgpool`
-
-```text
-maxpool.async
-    in   X
-    out  Y
-    kernel_shape = [kh, kw]
-    pads         = [pad_top, pad_left, pad_bottom, pad_right]
-    strides      = [stride_h, stride_w]
-```
-
-| Operand | Role | Notes |
-|---------|------|-------|
-| `X` | Input | Rank 4, layout NHWC |
-| `Y` | Output | Shape derived from X, kernel_shape, pads, strides |
-
-Element type is preserved. `avgpool` follows the same signature.
-
-#### Layout / Tensor View
-
-```text
-transpose.async     in X    out Y    perm = [<INT>, ...]
-reshape.async       in X    out Y    target_shape = [<INT>, ...]
-slice.async         in X    out Y    starts = [...]  ends = [...]  axes = [...]  steps = [...]
-concat.async        in X0, X1, ...   out Y    axis = <INT>
-split.async         in X    out Y0, Y1, ...   axis = <INT>  split_sizes = [...]
-pad.async           in X    out Y    pads = [...]  mode = <ID>  constant_value = <value>
-gather.async        in X, indices    out Y    axis = <INT>
-```
-
-These operations do not change element values, only their interpretation.
-Element count MUST be preserved for `reshape`. Output types match input types.
-
-#### Reduction
-
-```text
-reduce_sum.async    in X    out Y    axes = [<INT>, ...]    keepdims = <BOOL>
-reduce_max.async    in X    out Y    axes = [<INT>, ...]    keepdims = <BOOL>
-reduce_min.async    in X    out Y    axes = [<INT>, ...]    keepdims = <BOOL>
-argmax.async        in X    out Y    axis = <INT>           keepdims = <BOOL>
-argmin.async        in X    out Y    axis = <INT>           keepdims = <BOOL>
-```
-
-Output rank is derived from reduction axes and `keepdims`.
-`argmax` / `argmin` output integer index types.
-
-#### Type Conversion
-
-```text
-cast.async          in X    out Y
-quantize.async      in X    out Y                    // Y.quant MUST be set
-dequantize.async    in X    out Y                    // X.quant MUST be set
-```
-
-`cast` converts between any supported element types. No implicit casts elsewhere.
-`quantize` requires the output region to carry a quantization descriptor.
-`dequantize` requires the source region to carry a quantization descriptor.
-
-#### Generic Escape Hatch
-
-```text
-compute.async
-    in   ...
-    out  ...
-    op   = <STRING>
-    attrs = { ... }
-```
-
-Used for forward compatibility. Binders MAY reject unknown operations.
+The registry schema is defined in `spec/registry/schema.json`. Tools MUST validate their
+opcode tables against the registry. The contract governing the registry is documented
+in `docs/contracts/opcode-registry.md`.
 
 ---
 
@@ -1571,10 +1552,14 @@ The following table summarizes the hardware support status:
 | Category | Opcodes | NPM Hardware Status |
 |----------|---------|-------------------|
 | Linear Algebra | `gemm`, `matmul` | Supported (NMU) |
+| Linear Algebra (INT4) | `gemm` (i4×i8 mixed-precision) | Supported (NMU) |
 | Convolution | `conv2d` | Supported (NMU) |
+| Convolution (INT4) | `conv2d` (i4×i8 mixed-precision) | Supported (NMU) |
 | Convolution | `conv1d`, `conv3d`, `depthwise_conv2d` | Future |
-| Elementwise | `relu`, `add`, `mul`, `sub`, ... | Supported (CSTL) |
+| Elementwise | `relu`, `gelu`, `silu`, `add`, `mul`, `sub`, ... | Supported (CSTL) |
 | Pooling | `maxpool`, `avgpool` | Supported (CSTL) |
+| Normalization | `layernorm`, `rmsnorm` | Supported (CSTL) |
+| Softmax | `softmax`, `log_softmax` | Supported (CSTL) |
 | Layout / View | `transpose`, `reshape`, ... | Supported (CSTL / DMA) |
 | Reduction | `reduce_sum`, `reduce_max`, ... | Future |
 | Type Conversion | `cast`, `quantize`, `dequantize` | Partial (CSTL store-path quantization) |
@@ -1601,10 +1586,15 @@ by implementation priority:
 | Buffers, regions, tasks, tokens | Core Program Objects | Fundamental execution model |
 | `transfer.async/sync`, `store.async/sync`, `wait` | Task Taxonomy | Core data movement and synchronization |
 | `conv2d`, `gemm`/`matmul` | Compute Tasks | Supported on NMU |
-| Elementwise ops (`relu`, `add`, `mul`, etc.) | Compute Tasks | Supported on CSTL |
+| Elementwise ops (`relu`, `gelu`, `silu`, `add`, `mul`, etc.) | Compute Tasks | Supported on CSTL |
 | `maxpool`, `avgpool` | Compute Tasks | Supported on CSTL |
+| `layernorm`, `rmsnorm` | Compute Tasks | Supported on CSTL |
+| `softmax`, `log_softmax` | Compute Tasks | Supported on CSTL |
+| FLOAT literals | Formal Language Definition | Required for `epsilon`, `alpha` attributes |
 | Layout/view ops (`transpose`, `reshape`, etc.) | Compute Tasks | Supported on CSTL/DMA |
 | `cast` (partial), store-path quantization | Type Conversion | Partial CSTL support |
+| `gemm.int4`, `conv2d.int4` (mixed-precision) | Compute Tasks | INT4 weights × INT8 activations on NMU |
+| `quant_desc` (per-tensor, per-channel, per-group) | Type System | Quantization descriptors for INT4/INT8 |
 | `i4`, `i8`, `u8`, `f16`, `bf16` element types | Type System | Current NPM datapath widths |
 | MUST type family variants | Type Family Conformance | Listed in `opcode.mandatory` via baseline device |
 | Single-engine execution | Abstract Machine Model | Minimum viable configuration |
@@ -1629,7 +1619,6 @@ by implementation priority:
 | `@memmove` decorator | Decorators | Rare use case; overlapping transfers uncommon |
 | `@debug`, `@profile` decorators | Decorators | Tooling support, not execution |
 | Device inheritance (`extends`) | Device Configuration | SKU differentiation; single-device configs sufficient initially |
-| `softmax` | Compute Tasks | Composite operation on current hardware |
 
 Implementations SHOULD prioritize Priority 1 features for initial bringup and conformance.
 Priority 2 features are fully specified and MUST be implemented to claim full NEM conformance,
@@ -1707,10 +1696,12 @@ config_body_or_ext     ::= config_body                    (* base device *)
 
 config_body            ::= spec_clause
                            topology_block?
+                           unit_chars_block?
                            opcode_mandatory_block
                            opcode_extended_block? ;
 
 derived_body           ::= topology_block?
+                           unit_chars_block?
                            opcode_mandatory_block?
                            opcode_extended_block? ;
 
@@ -1718,9 +1709,21 @@ spec_clause            ::= "spec_version" "=" STRING ;
 
 topology_block         ::= "topology" "{"
                               "num_engines" "=" INT
-                              "per_engine" "{" { unit_decl } "}"
+                              "l2_size_bytes" "=" expr
+                              device_units_block?
+                              "per_engine" "{"
+                                  { unit_decl }
+                                  "l1_size_bytes" "=" expr
+                              "}"
                             "}" ;
+device_units_block     ::= "device_units" "{" { unit_decl } "}" ;
 unit_decl              ::= unit_type "=" INT ;
+
+(* --- Unit Characteristics --- *)
+
+unit_chars_block       ::= "unit_characteristics" "{" { unit_chars_group } "}" ;
+unit_chars_group       ::= unit_type "{" { char_decl } "}" ;
+char_decl              ::= ID "=" INT ;
 
 opcode_mandatory_block ::= "opcode.mandatory" "{" { variant_ref } "}" ;
 opcode_extended_block  ::= "opcode.extended"  "{" { variant_ref } "}" ;
@@ -1736,6 +1739,37 @@ capability blocks (e.g. `memory.features`, `interconnect.modes`).
 The `variant_ref` production is shared between `opcode.mandatory` and `opcode.extended`
 blocks in device configurations.
 
+**Memory Capacity Fields (Normative):**
+`l2_size_bytes` declares the total L2 (on-chip shared) memory capacity in bytes.
+`l1_size_bytes` declares the per-engine L1 (on-chip scratchpad) memory capacity in bytes.
+Both fields are required in the `topology` block. The binder uses these values to
+validate buffer allocations and choose tile sizes.
+
+**Device-Level Units (`device_units`):**
+The `device_units` block declares execution units that exist at the device level, shared
+across all Engines. These units are NOT valid `@resource` targets (see Decorators).
+Their counts inform the binder's scheduling decisions — for example, how many concurrent
+DDR↔L2 transfers can be overlapped via `sDMA`, or how many weight decompression streams
+are available via `WDM`. If `device_units` is absent, the device has no device-level units.
+
+**Unit Characteristics (`unit_characteristics`):**
+The `unit_characteristics` block declares per-unit-type properties as key-value pairs
+(integer values only). This mechanism serves two purposes: (a) the binder uses
+characteristics for code generation decisions (e.g., choosing tile sizes based on
+MAC throughput), and (b) NEM programs can be validated against device capabilities
+(e.g., checking that a program's synchronization token usage does not exceed the
+sequencer's limit).
+
+The set of recognized characteristic keys is **open-ended**: unknown keys are permitted
+and MUST be preserved by tools (forward compatibility). The following well-known keys
+have normative semantics in this revision:
+
+- `NMU.int4_macs`, `NMU.int8_macs`, `NMU.int16_macs`, `NMU.fp16_macs` — MACs per
+  cycle per NMU instance, by datatype. Used by the binder for performance estimation.
+- `SEQ.max_active_tokens` — maximum number of simultaneously live synchronization
+  tokens the sequencer supports. The binder MUST ensure the lowered TCB stream does
+  not exceed this limit.
+
 ### Device Inheritance (Normative)
 
 A device configuration may extend another device configuration via the `extends` clause.
@@ -1746,23 +1780,30 @@ with topology and additional opcode support.
 **Inheritance Rules:**
 
 1. A derived device inherits **all** parent fields: `spec_version`, `topology`,
-   `opcode.mandatory`, and `opcode.extended`.
+   `unit_characteristics`, `opcode.mandatory`, and `opcode.extended`.
 2. A derived device body (`derived_body`) MAY contain any combination of:
-   `topology`, `opcode.mandatory`, and/or `opcode.extended`. A derived device
-   MUST NOT specify `spec_version` — it is always inherited from the parent.
+   `topology`, `unit_characteristics`, `opcode.mandatory`, and/or `opcode.extended`.
+   A derived device MUST NOT specify `spec_version` — it is always inherited from
+   the parent.
 3. **Topology**: If a derived device specifies a `topology` block, it **replaces**
-   the parent's topology. If the parent has no topology (abstract device), the
-   derived device MUST provide one.
-4. **`opcode.mandatory`**: The resolved `opcode.mandatory` set is the **union** of
+   the parent's topology (including `l1_size_bytes`, `l2_size_bytes`, `device_units`,
+   and all `per_engine` declarations). If the parent has no topology (abstract device),
+   the derived device MUST provide one.
+4. **`unit_characteristics`**: The resolved `unit_characteristics` is the **merge**
+   of the parent's and child's blocks. Within a unit type, child keys override
+   parent keys with the same name. Across unit types, the union of all declared
+   unit type groups is taken. A child cannot remove characteristics from the parent;
+   it can only override or add.
+5. **`opcode.mandatory`**: The resolved `opcode.mandatory` set is the **union** of
    the parent's and child's `opcode.mandatory`. Inheritance is additive only — a
    child cannot remove variants from the parent.
-5. **`opcode.extended`**: The resolved `opcode.extended` set is the **union** of
+6. **`opcode.extended`**: The resolved `opcode.extended` set is the **union** of
    the parent's and child's `opcode.extended`. Inheritance is additive only.
-6. The parent device MUST be defined before the child, either in the same file or
+7. The parent device MUST be defined before the child, either in the same file or
    made visible via `include`. The parent MAY be an abstract device (no topology).
    Multi-level inheritance is permitted (A extends B extends C). Single parent only —
    multiple inheritance is not supported.
-7. **Resolution validity**: After inheritance resolution, the resolved device MUST
+8. **Resolution validity**: After inheritance resolution, the resolved device MUST
    satisfy all Schema Rules: topology MUST be present, `opcode.mandatory` MUST be
    non-empty, and `opcode.mandatory ∩ opcode.extended` MUST be empty.
 
@@ -1898,6 +1939,32 @@ Normative notes:
 3) `accum_type` MUST equal the family's `accum` attribute.
 4) Additional constraints (layout NHWC/HWIO, groups, etc.) are defined by the `conv2d` opcode semantics and must be satisfied independently.
 
+#### `conv2d.int4` (Mixed-Precision)
+
+INT4 mixed-precision convolution: i4 weights with i8 activations (AD-6).
+Quantization is required for the i4 weight operand.
+
+```text
+type_family conv2d.int4 {
+    X: i8
+    W: i4
+    Y: i8
+    accum = i32
+    quant = required
+
+    variants:
+      no_bias: { B: absent }
+        conformance: { MAY }
+      with_bias: { B: i32 }
+        conformance: { MAY }
+}
+```
+
+Normative notes:
+1) This family is not parameterized — it has a single fixed type combination (i4 weights × i8 activations).
+2) The `W` operand MUST carry a `quant` attribute (per-tensor, per-channel, or per-group).
+3) Per-group quantization (e.g., `group_size=32` or `group_size=128`) is the expected format for INT4 LLM weight compression.
+
 ### `gemm` / `matmul` Type Families
 
 Operands: `A`, `B`, optional `C` (bias/addend), `Y` (output).
@@ -1939,10 +2006,37 @@ Normative notes:
 1) `matmul` shares the same type family legality as `gemm` unless stated otherwise by opcode definition.
 2) Shape/rank legality and transpose attributes (if any) are defined by opcode semantics.
 
+#### `gemm.int4` (Mixed-Precision)
+
+INT4 mixed-precision matrix multiply: i4 weights with i8 activations (AD-6).
+Quantization is required for the i4 weight operand.
+
+```text
+type_family gemm.int4 {
+    A: i8
+    B: i4
+    Y: i8
+    accum = i32
+    quant = required
+
+    variants:
+      no_bias: { C: absent }
+        conformance: { MAY }
+      with_bias: { C: i32 }
+        conformance: { MAY }
+}
+```
+
+Normative notes:
+1) This family is not parameterized — it has a single fixed type combination (i4 weights × i8 activations).
+2) The `B` operand MUST carry a `quant` attribute (per-tensor, per-channel, or per-group).
+3) `matmul` shares the same type family legality as `gemm.int4`.
+
 ### Elementwise Type Families
 
-Elementwise ops (`relu`, `add`, `sub`, `mul`, `min`, `max`, `clamp`, ...) preserve shape
-and typically preserve element type.
+Elementwise ops (`relu`, `gelu`, `silu`, `add`, `sub`, `mul`, `min`, `max`, `clamp`, ...)
+preserve shape and typically preserve element type. `gelu` and `silu` are unary
+activations that reuse this family (AD-5).
 
 ```text
 type_family eltwise<T: {i8, i16, i32, f16, bf16, f32}> {
@@ -1977,6 +2071,45 @@ type_family view<T: {i8, i16, i32, f16, bf16, f32}> {
 Normative notes:
 1) If the opcode changes layout/strides, the region byte-extent consistency rules MUST still hold.
 2) For `reshape`, element count MUST be preserved.
+
+### Normalization Type Families
+
+Normalization ops (`layernorm`, `rmsnorm`) compute normalized output along a specified axis.
+
+```text
+type_family norm<T: {f16, bf16, f32}> {
+    input: T
+    output: T
+
+    variants:
+      default: {}
+        conformance: { MUST <f16>   MAY <bf16>   MAY <f32> }
+}
+```
+
+Normative notes:
+1) This family covers both `layernorm` and `rmsnorm` opcodes. The opcode signature determines which optional operands (`scale`, `bias`) are permitted.
+2) When `scale` and/or `bias` operands are present, their element type MUST match `T`.
+3) The `epsilon` attribute is a FLOAT literal; it is not constrained by the type family.
+
+### Softmax Type Families
+
+Softmax ops (`softmax`, `log_softmax`) compute probability distributions along a specified axis.
+
+```text
+type_family softmax<T: {f16, bf16, f32}> {
+    input: T
+    output: T
+
+    variants:
+      default: {}
+        conformance: { MUST <f16>   MAY <bf16>   MAY <f32> }
+}
+```
+
+Normative notes:
+1) This family covers both `softmax` and `log_softmax` opcodes.
+2) Input and output shapes MUST be identical; the `axis` attribute selects the normalization dimension but does not alter shape.
 
 ### Type Conversion Families
 
@@ -2059,6 +2192,8 @@ are **informative** — the type family definitions are normative.
 | `conv2d.float<bf16>.with_bias` | MAY | bf16 | bf16 | bf16 | bf16 | f32 | absent |
 | `conv2d.float<f32>.no_bias` | MAY | f32 | f32 | — | f32 | f32 | absent |
 | `conv2d.float<f32>.with_bias` | MAY | f32 | f32 | f32 | f32 | f32 | absent |
+| `conv2d.int4.no_bias` | MAY | i8 | i4 | — | i8 | i32 | required |
+| `conv2d.int4.with_bias` | MAY | i8 | i4 | i32 | i8 | i32 | required |
 
 #### gemm / matmul Expansion
 
@@ -2071,6 +2206,8 @@ are **informative** — the type family definitions are normative.
 | `gemm.float<f16>.with_bias` | MUST | f16 | f16 | f16 | f16 | f32 | absent |
 | `gemm.float<bf16>.no_bias` | MAY | bf16 | bf16 | — | bf16 | f32 | absent |
 | `gemm.float<f32>.no_bias` | MAY | f32 | f32 | — | f32 | f32 | absent |
+| `gemm.int4.no_bias` | MAY | i8 | i4 | — | i8 | i32 | required |
+| `gemm.int4.with_bias` | MAY | i8 | i4 | i32 | i8 | i32 | required |
 
 #### eltwise Expansion
 
@@ -2093,6 +2230,22 @@ are **informative** — the type family definitions are normative.
 | `view<f16>.default` | MUST | f16 | f16 |
 | `view<bf16>.default` | MAY | bf16 | bf16 |
 | `view<f32>.default` | MAY | f32 | f32 |
+
+#### norm Expansion
+
+| Variant Reference | Class | Input | Output |
+|---|---:|---|---|
+| `norm<f16>.default` | MUST | f16 | f16 |
+| `norm<bf16>.default` | MAY | bf16 | bf16 |
+| `norm<f32>.default` | MAY | f32 | f32 |
+
+#### softmax Expansion
+
+| Variant Reference | Class | Input | Output |
+|---|---:|---|---|
+| `softmax<f16>.default` | MUST | f16 | f16 |
+| `softmax<bf16>.default` | MAY | bf16 | bf16 |
+| `softmax<f32>.default` | MAY | f32 | f32 |
 
 #### cast Expansion
 

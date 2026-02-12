@@ -2,7 +2,7 @@
   "name": "nem-language",
   "displayName": "NEM - NeuPro-M Execution Model",
   "description": "Syntax highlighting for the NEM (NeuPro-M Execution Model) language",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "lhamacpp-npm",
   "engines": {
     "vscode": "^1.75.0"

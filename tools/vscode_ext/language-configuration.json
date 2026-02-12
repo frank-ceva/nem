@@ -21,7 +21,7 @@
   ],
   "folding": {
     "markers": {
-      "start": "^\\s*(loop|device|topology|per_engine|opcode\\.(mandatory|extended)|program)\\b",
+      "start": "^\\s*(loop|device|topology|per_engine|device_units|unit_characteristics|opcode\\.(mandatory|extended)|type_family|program)\\b",
       "end": "^\\s*(endloop|\\})"
     }
   },

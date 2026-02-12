@@ -10,6 +10,7 @@ Contracts define the **shared interfaces** between tools in the NEM toolchain. T
 | Object/Bytecode Format | `object-format.md` | TBD | Binary format for encoded programs consumed by the simulator |
 | CLI Contract | `cli-contract.md` | TBD | Command-line interface conventions shared across tools |
 | Diagnostics Contract | `diagnostics-contract.md` | TBD | Error/warning message format and severity levels |
+| Opcode Registry | `opcode-registry.md` | Active | Machine-readable opcode signatures, operands, and attributes |
 
 ## Versioning
 

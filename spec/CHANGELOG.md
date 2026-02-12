@@ -23,6 +23,273 @@ Each entry follows this format:
 
 ---
 
+## [2026-02-12] — Extract Opcode Signatures into Machine-Readable Registry
+
+### Changed
+- **Opcode Registry created:** `spec/registry/opcodes.yaml` now defines the formal operand
+  structure, attributes, type family associations, execution unit mapping, and hardware
+  support status for all 49 NEM opcodes. This is the single source of truth for opcode
+  signatures.
+- **Registry schema:** `spec/registry/schema.json` (JSON Schema draft 2020-12) enforces
+  structural validity. Validation via `python3 spec/registry/validate.py`.
+- **Spec section replaced:** The "Opcode Signatures (Normative)" section previously
+  contained ~280 lines of inline opcode definitions. It now contains a normative
+  reference to `spec/registry/opcodes.yaml`, delegating opcode catalog ownership to the
+  registry while the spec retains ownership of semantic rules (type promotion,
+  broadcasting, execution ordering, memory model).
+- **Contract added:** `docs/contracts/opcode-registry.md` documents the registry's
+  normative status, schema, consumption patterns, and change process.
+
+### Impact
+- **All tools affected.** Tools should consume opcode metadata from `spec/registry/opcodes.yaml`
+  instead of hand-coding opcode tables. Work items added to each tool's `work.md`.
+- **VSCode extension affected.** Syntax highlighting opcode regex
+  (`tools/vscode_ext/syntaxes/nem.tmLanguage.json` line 73) should be generated from
+  the registry in the future.
+- **Conformance tests:** `tests/conformance/registry/test_registry.py` validates
+  registry well-formedness and cross-references.
+- **Contract updated:** `docs/contracts/README.md` inventory includes the new
+  Opcode Registry contract.
+
+---
+
+## [2026-02-12] — Examples, Baseline Update, and Tool Propagation
+
+### Changed
+- **Baseline device file verified:** `examples/npm_baseline_1.0.nem` confirmed to contain
+  all type family definitions (conv2d.float, conv2d.int8, conv2d.int4, gemm.float,
+  gemm.int8, gemm.int4, eltwise, view, norm, softmax, cast, quantize, dequantize) and
+  all 17 MUST-class variants in `opcode.mandatory`.
+
+- **New example added:** `examples/gemm_rmsnorm.nem` — GEMM + RMSNorm tiled pipeline
+  demonstrating the new `rmsnorm` opcode with `epsilon` FLOAT literal, `@readonly` scale
+  vector, `@materialized` intermediate, and token dependency chaining. Represents a
+  transformer MLP block pattern.
+
+- **Conformance tests added:** 10 new test files (43 total cases) across 3 directories:
+  - `tests/conformance/device_config/` — device_units, memory_sizes,
+    unit_characteristics, resource_invalid (19 cases)
+  - `tests/conformance/opcodes/` — normalization, softmax, activations (14 cases)
+  - `tests/conformance/types/` — float_literal, quant_desc, int4_families (10 cases)
+
+- **Tool propagation work items created:** Work items added to
+  `tools/interpreter/work.md`, `tools/compiler/work.md`, `tools/binder/work.md`,
+  `tools/simulator/work.md` covering all parser, semantic analysis, and runtime
+  changes needed to support the extended device model and new opcodes.
+
+### Impact
+- **All tools affected.** Each tool has a new top-priority work item describing the
+  required changes. See individual `tools/*/work.md` files.
+- **Conformance tests:** 43 new test cases ready for tool implementations to validate
+  against. All tests are currently stubs (`pass` bodies) to be wired to parsers.
+- **No spec changes.** This work item only adds examples, tests, and tool work items.
+
+---
+
+## [2026-02-12] — Type System Extensions (INT4, per-group quantization)
+
+### Changed
+- **`quant_desc` grammar formalized:** Added `quant_desc`, `per_tensor_quant`,
+  `per_channel_quant`, and `per_group_quant` productions to the EBNF. Previously
+  `quant_desc` was referenced in `type_attrs` but never formally defined.
+  Section: "Formal Language Definition > Grammar".
+
+- **Per-group quantization descriptor added:** New `per_group(axis=<INT>,
+  group_size=<INT>, scales=[...], zero_points=[...])` form. Groups of `group_size`
+  elements along the specified axis share a common scale and zero point. Array lengths
+  MUST equal `⌈dim[axis] / group_size⌉`. This is the dominant format for INT4 LLM
+  weight compression.
+  Section: "Type System > Quantization Descriptor".
+
+- **Quantization Descriptor section rewritten:** Expanded from a brief two-line
+  description to a complete reference covering all three forms (per-tensor, per-channel,
+  per-group) with formal rules for array lengths and group size constraints.
+  Section: "Type System > Quantization Descriptor".
+
+- **`conv2d.int4` type family added (new):** Non-parameterized mixed-precision family
+  (i4 weights × i8 activations, i32 accumulation, quant required). Two MAY variants:
+  `no_bias` and `with_bias`. Section: "Appendix: Type Family Definitions > conv2d".
+
+- **`gemm.int4` type family added (new):** Non-parameterized mixed-precision family
+  (i4 weights × i8 activations, i32 accumulation, quant required). Two MAY variants:
+  `no_bias` and `with_bias`. Section: "Appendix: Type Family Definitions > gemm".
+
+- **MAY Variant Inventory updated:** Added `gemm.int4.no_bias`, `gemm.int4.with_bias`,
+  `conv2d.int4.no_bias`, `conv2d.int4.with_bias`.
+  Section: "MAY Variant Inventory".
+
+- **NPM Hardware Support Status updated:** Added rows for Linear Algebra (INT4) and
+  Convolution (INT4), both Supported on NMU.
+  Section: "NPM Hardware Support Status".
+
+- **Implementation Priority updated:** Added `gemm.int4`/`conv2d.int4` and
+  `quant_desc` (all three forms) to Priority 1.
+  Section: "Implementation Priority".
+
+- **Variant Expansion tables updated:** Added `conv2d.int4` and `gemm.int4` rows to
+  conv2d and gemm expansion tables.
+  Section: "Variant Expansion Reference".
+
+- **Baseline device file updated:** Added `conv2d.int4` and `gemm.int4` type family
+  definitions to `examples/npm_baseline_1.0.nem`. These are MAY-class families (not
+  added to `opcode.mandatory` — devices opt in via `opcode.extended`).
+
+### Impact
+- **All tools affected.** Parser must support `quant_desc` grammar with all three
+  forms (per-tensor, per-channel, per-group). Must handle `gemm.int4` and `conv2d.int4`
+  as non-parameterized type families.
+- **Binder especially affected:** Must handle per-group quantization descriptor
+  unpacking/repacking and INT4 weight layout.
+- **Conformance tests needed:** `quant_desc` parsing (all three forms), INT4 type family
+  validation, per-group array length rules. Tests will be added in Work Item D.
+- **No contract changes.** IR schema, CLI, and diagnostics contracts are not affected.
+
+---
+
+## [2026-02-12] — New Opcodes (softmax, layernorm, rmsnorm, gelu, silu)
+
+### Changed
+- **FLOAT literal grammar added:** New lexical production
+  `FLOAT ::= DIGIT+ "." DIGIT+ ( [eE] [+-]? DIGIT+ )?`. Extended `primary` to accept
+  FLOAT. FLOAT literals are permitted only in compute attribute values (e.g., `epsilon`,
+  `alpha`). Buffer sizes, region offsets, shape dimensions, loop bounds, and `const`
+  declarations remain integer-only.
+  Section: "Formal Language Definition > Grammar".
+
+- **Normalization opcodes added:** `layernorm.async` and `rmsnorm.async` with operands
+  X, optional scale/bias, output Y, and required attributes `axis` (INT) and `epsilon`
+  (FLOAT). New "Normalization" subsection in Opcode Signatures.
+  Section: "Opcode Signatures > Normalization".
+
+- **Softmax opcodes added:** `softmax.async` and `log_softmax.async` with operands X,
+  output Y, and required attribute `axis` (INT). New "Softmax" subsection in Opcode
+  Signatures.
+  Section: "Opcode Signatures > Softmax".
+
+- **Activation opcodes added:** `gelu.async` and `silu.async` added to the existing
+  unary elementwise operations list. Reuse existing `eltwise<T>` type family (AD-5).
+  Section: "Opcode Signatures > Elementwise > Unary Operations".
+
+- **`norm` type family added (new):** `norm<T: {f16, bf16, f32}>` covering `layernorm`
+  and `rmsnorm` opcodes. Conformance: MUST `<f16>`, MAY `<bf16>`, MAY `<f32>`.
+  Section: "Appendix: Type Family Definitions > Normalization Type Families".
+
+- **`softmax` type family added (new):** `softmax<T: {f16, bf16, f32}>` covering
+  `softmax` and `log_softmax` opcodes. Conformance: MUST `<f16>`, MAY `<bf16>`,
+  MAY `<f32>`.
+  Section: "Appendix: Type Family Definitions > Softmax Type Families".
+
+- **MUST Variant Reference updated:** Added `norm<f16>.default` and
+  `softmax<f16>.default` to the MUST variant table.
+  Section: "MUST Variant Reference (Informative)".
+
+- **MAY Variant Inventory updated:** Added `norm<bf16>.default`, `norm<f32>.default`,
+  `softmax<bf16>.default`, `softmax<f32>.default` to the MAY variant table.
+  Section: "MAY Variant Inventory".
+
+- **NPM Hardware Support Status updated:** Added rows for Normalization (`layernorm`,
+  `rmsnorm` — Supported on CSTL), Softmax (`softmax`, `log_softmax` — Supported on
+  CSTL), and updated Elementwise row to include `gelu`, `silu`.
+  Section: "NPM Hardware Support Status".
+
+- **Implementation Priority updated:** Moved `softmax` from Priority 2 to Priority 1.
+  Added `layernorm`, `rmsnorm`, `log_softmax`, `gelu`, `silu`, and FLOAT literals to
+  Priority 1. Section: "Implementation Priority".
+
+- **Variant Expansion tables added:** New `norm Expansion` and `softmax Expansion`
+  tables in the appendix.
+  Section: "Variant Expansion Reference".
+
+- **Baseline device file updated:** Added `norm` and `softmax` type family definitions
+  and MUST variants (`norm<f16>.default`, `softmax<f16>.default`) to
+  `examples/npm_baseline_1.0.nem`.
+
+### Impact
+- **All tools affected.** Parser must support FLOAT lexical token, extended `primary`
+  production, and 6 new opcode names (`layernorm`, `rmsnorm`, `softmax`, `log_softmax`,
+  `gelu`, `silu`). Semantic analysis must validate `epsilon` and `axis` attributes,
+  check operand shapes and types against `norm` and `softmax` type families.
+- **Binder affected:** Must handle normalization and softmax op lowering to CSTL.
+- **Baseline device:** Updated — tools parsing `npm_baseline_1.0.nem` must handle the
+  new type families.
+- **Conformance tests needed:** New opcode parsing, type family validation, FLOAT literal
+  parsing, epsilon/axis attribute validation. Tests will be added in Work Item D.
+- **No contract changes.** IR schema, CLI, and diagnostics contracts are not affected.
+
+---
+
+## [2026-02-12] — Device Topology and Unit Model
+
+### Changed
+- **Execution Units section rewritten:** Added Per-Engine unit table (NMU, CSTL, DMA, VPU,
+  SEQ) and Device-Level unit table (sDMA, WDM). Added detailed descriptions of the sDMA vs
+  engine DMA distinction (DDR<->L2 vs L2<->L1), WDM role (on-the-fly weight decompression),
+  VPU role (programmable vector/scalar operations), and SEQ role (task dispatch and
+  synchronization). Expanded task-to-unit mapping with new operations and units.
+  Section: "Execution Units".
+
+- **`unit_type` grammar extended:** Changed from `"NMU" | "CSTL" | "DMA"` to
+  `"NMU" | "CSTL" | "DMA" | "VPU" | "SEQ" | "sDMA" | "WDM"`.
+  Section: "Formal Language Definition > Grammar".
+
+- **`topology_block` grammar extended:** Added `l2_size_bytes` (required, integer expression)
+  at the topology level. Added `device_units_block` for device-level units (sDMA, WDM counts).
+  Added `l1_size_bytes` (required, integer expression) inside `per_engine`. Added
+  `device_units_block ::= "device_units" "{" { unit_decl } "}"`.
+  Section: "Formal Language Definition > Grammar".
+
+- **`unit_characteristics` grammar added:** New `unit_chars_block`, `unit_chars_group`, and
+  `char_decl` productions for declaring per-unit-type key-value properties (e.g.,
+  `NMU.int4_macs`, `SEQ.max_active_tokens`). Added to both `config_body` and `derived_body`.
+  Section: "Formal Language Definition > Grammar".
+
+- **@resource-invalid rule added:** SEQ, sDMA, and WDM are NOT valid `@resource` targets.
+  Programs MUST NOT use `@resource` with these unit types; such usage is a static error.
+  Valid `@resource` targets: NMU, CSTL, DMA, VPU.
+  Section: "Decorators".
+
+- **Schema Rules updated:** Added Rule 5 (per-engine unit counts ≥ 1, device_units MAY be 0,
+  memory sizes > 0). Added Rule 6 (memory capacity — sum of buffer sizes at a given memory
+  level MUST NOT exceed declared capacity). Renumbered MUST variant rule to Rule 7.
+  Section: "Schema Rules".
+
+- **Inheritance Rules updated:** Now 8 rules (was 7). Added Rule 4: `unit_characteristics`
+  from a derived device merges with the parent's (per-key override within a unit type;
+  additive across unit types). Updated Rules 1-2 to include `unit_characteristics` in the
+  set of blocks that participate in inheritance.
+  Section: "Inheritance Rules".
+
+- **Device config examples updated:** All 4 device config examples in the spec (npm_lite,
+  npm_mid, npm_pro, multi-file npm_pro) now include `l2_size_bytes`, `device_units` (sDMA,
+  WDM), `per_engine` with VPU, SEQ, `l1_size_bytes`, and `unit_characteristics` blocks.
+  Section: "Device Configuration" examples.
+
+- **Standalone example files updated:** `examples/npm_lite_.nem` updated with full new
+  topology. Section: companion file.
+
+- **`spec/examples.md` device configs updated:** Both device configs (npm_lite,
+  npm_quad_cstl) updated with full new topology including device_units, memory sizes,
+  VPU, SEQ, and unit_characteristics.
+  Section: companion document `examples.md`.
+
+- **Quantization WARNING updated:** Reference to VPU as a declared unit type for standalone
+  quantize/dequantize operations. Section: "Type System > Quantization".
+
+### Impact
+- **All tools affected.** Parser must support extended `unit_type` production (VPU, SEQ,
+  sDMA, WDM), `device_units_block`, `l1_size_bytes`/`l2_size_bytes`, and
+  `unit_characteristics` grammar. Semantic analysis must enforce @resource-invalid rule,
+  memory capacity rule, and unit_characteristics merge inheritance.
+- **Binder especially affected:** Must consume `unit_characteristics` for scheduling
+  decisions, use `l1_size_bytes`/`l2_size_bytes` for buffer allocation validation, and
+  be aware of sDMA/WDM counts for transfer path selection.
+- **Conformance tests needed:** Device config parsing (new topology fields), @resource
+  with invalid unit types (should be rejected), memory capacity validation, unit
+  characteristics inheritance. Tests will be added in Work Item D.
+- **No contract changes.** IR schema, CLI, and diagnostics contracts are not affected.
+
+---
+
 ## [2026-02-12] — Add `const` declarations
 
 ### Changed

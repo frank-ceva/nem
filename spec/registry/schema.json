@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NEM Opcode Registry",
+  "description": "Machine-readable registry of NEM opcode signatures, operands, and attributes.",
+  "type": "object",
+  "required": ["version", "opcodes"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$",
+      "description": "Registry schema version (MAJOR.MINOR)"
+    },
+    "opcodes": {
+      "type": "object",
+      "description": "Map of opcode name to its definition.",
+      "additionalProperties": {
+        "$ref": "#/$defs/opcode"
+      },
+      "minProperties": 1
+    }
+  },
+  "$defs": {
+    "opcode": {
+      "type": "object",
+      "required": ["category", "status", "forms", "operands"],
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "data_movement",
+            "linear_algebra",
+            "convolution",
+            "elementwise_unary",
+            "elementwise_binary",
+            "elementwise_other",
+            "pooling",
+            "layout",
+            "reduction",
+            "normalization",
+            "softmax",
+            "type_conversion",
+            "generic"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["stable", "provisional", "future"],
+          "description": "stable = shipping; provisional = specified but not yet hardware-validated; future = planned"
+        },
+        "forms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["async", "sync"]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "operands": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/operand" },
+          "minItems": 1
+        },
+        "attributes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attribute" }
+        },
+        "type_families": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Type family names from the baseline device file that govern this opcode's type legality."
+        },
+        "execution_unit": {
+          "type": "string",
+          "enum": ["NMU", "CSTL", "DMA", "sDMA", "VPU", "SEQ", "varies"],
+          "description": "Primary execution unit that handles this opcode."
+        },
+        "hardware_status": {
+          "type": "string",
+          "enum": ["supported", "future", "partial", "escape_hatch"],
+          "description": "Current NPM hardware support status."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional clarifying notes."
+        },
+        "variadic_inputs": {
+          "type": "boolean",
+          "description": "True if the opcode accepts a variable number of input operands (e.g., concat)."
+        },
+        "variadic_outputs": {
+          "type": "boolean",
+          "description": "True if the opcode produces a variable number of output operands (e.g., split)."
+        }
+      }
+    },
+    "operand": {
+      "type": "object",
+      "required": ["name", "direction", "required", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Operand name as used in NEM programs."
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["in", "out"]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string",
+          "description": "Human-readable role description."
+        },
+        "constraints": {
+          "type": "string",
+          "description": "Shape, rank, or layout constraints on this operand."
+        }
+      }
+    },
+    "attribute": {
+      "type": "object",
+      "required": ["name", "type", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["int", "float", "bool", "elem_type", "int_list", "string", "id"],
+          "description": "Attribute value type."
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {
+          "description": "Default value if not required."
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

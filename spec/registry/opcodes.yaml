@@ -1,0 +1,1257 @@
+version: "1.0"
+opcodes:
+
+  # ---------------------------------------------------------------------------
+  # Data Movement
+  # ---------------------------------------------------------------------------
+  transfer:
+    category: data_movement
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: src
+        direction: in
+        required: true
+        role: "Source region"
+      - name: dst
+        direction: out
+        required: true
+        role: "Destination region"
+    execution_unit: DMA
+    hardware_status: supported
+    notes: "Copies full extent of source region into destination. Compatible types required."
+
+  store:
+    category: data_movement
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: src
+        direction: in
+        required: true
+        role: "Source region"
+      - name: dst
+        direction: out
+        required: true
+        role: "Destination region"
+    execution_unit: DMA
+    hardware_status: supported
+    notes: "Commits region contents to declared memory level."
+
+  # ---------------------------------------------------------------------------
+  # Linear Algebra
+  # ---------------------------------------------------------------------------
+  gemm:
+    category: linear_algebra
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "Input activation"
+        constraints: "Rank >= 2"
+      - name: B
+        direction: in
+        required: true
+        role: "Weights / second operand"
+        constraints: "Rank >= 2, inner dims must match A"
+      - name: C
+        direction: in
+        required: false
+        role: "Bias / addend"
+        constraints: "Broadcastable to Y shape"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Shape derived from A, B dims"
+    attributes:
+      - name: accum_type
+        type: elem_type
+        required: true
+    type_families: [gemm.float, gemm.int8, gemm.int4]
+    execution_unit: NMU
+    hardware_status: supported
+
+  matmul:
+    category: linear_algebra
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "Input activation"
+        constraints: "Rank >= 2"
+      - name: B
+        direction: in
+        required: true
+        role: "Second operand"
+        constraints: "Rank >= 2, inner dims must match A"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Shape derived from A, B dims"
+    attributes:
+      - name: accum_type
+        type: elem_type
+        required: true
+    type_families: [gemm.float, gemm.int8, gemm.int4]
+    execution_unit: NMU
+    hardware_status: supported
+    notes: "Shares type families with gemm. No optional bias operand."
+
+  # ---------------------------------------------------------------------------
+  # Convolution
+  # ---------------------------------------------------------------------------
+  conv2d:
+    category: convolution
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input activation"
+        constraints: "Rank 4, layout NHWC"
+      - name: W
+        direction: in
+        required: true
+        role: "Weights"
+        constraints: "Rank 4, layout HWIO"
+      - name: B
+        direction: in
+        required: false
+        role: "Bias"
+        constraints: "Rank 1, shape [Cout]"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Shape derived from X, W, pads, strides, dilations, groups"
+    attributes:
+      - name: pads
+        type: int_list
+        required: true
+      - name: strides
+        type: int_list
+        required: true
+      - name: dilations
+        type: int_list
+        required: true
+      - name: groups
+        type: int
+        required: false
+        default: 1
+      - name: accum_type
+        type: elem_type
+        required: true
+    type_families: [conv2d.float, conv2d.int8, conv2d.int4]
+    execution_unit: NMU
+    hardware_status: supported
+
+  conv1d:
+    category: convolution
+    status: future
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input activation"
+        constraints: "Rank 3"
+      - name: W
+        direction: in
+        required: true
+        role: "Weights"
+        constraints: "Rank 3"
+      - name: B
+        direction: in
+        required: false
+        role: "Bias"
+        constraints: "Rank 1"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Shape derived from X, W, pads, strides, dilations, groups"
+    attributes:
+      - name: pads
+        type: int_list
+        required: true
+      - name: strides
+        type: int_list
+        required: true
+      - name: dilations
+        type: int_list
+        required: true
+      - name: groups
+        type: int
+        required: false
+        default: 1
+      - name: accum_type
+        type: elem_type
+        required: true
+    execution_unit: NMU
+    hardware_status: future
+    notes: "Operand roles follow the same pattern as conv2d with rank reduced by one."
+
+  conv3d:
+    category: convolution
+    status: future
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input activation"
+        constraints: "Rank 5"
+      - name: W
+        direction: in
+        required: true
+        role: "Weights"
+        constraints: "Rank 5"
+      - name: B
+        direction: in
+        required: false
+        role: "Bias"
+        constraints: "Rank 1"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Shape derived from X, W, pads, strides, dilations, groups"
+    attributes:
+      - name: pads
+        type: int_list
+        required: true
+      - name: strides
+        type: int_list
+        required: true
+      - name: dilations
+        type: int_list
+        required: true
+      - name: groups
+        type: int
+        required: false
+        default: 1
+      - name: accum_type
+        type: elem_type
+        required: true
+    execution_unit: NMU
+    hardware_status: future
+    notes: "Operand roles follow the same pattern as conv2d with rank increased by one."
+
+  depthwise_conv2d:
+    category: convolution
+    status: future
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input activation"
+        constraints: "Rank 4, layout NHWC"
+      - name: W
+        direction: in
+        required: true
+        role: "Weights"
+        constraints: "Rank 4"
+      - name: B
+        direction: in
+        required: false
+        role: "Bias"
+        constraints: "Rank 1"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Shape derived from X, W, pads, strides, dilations"
+    attributes:
+      - name: pads
+        type: int_list
+        required: true
+      - name: strides
+        type: int_list
+        required: true
+      - name: dilations
+        type: int_list
+        required: true
+      - name: accum_type
+        type: elem_type
+        required: true
+    execution_unit: NMU
+    hardware_status: future
+    notes: "Equivalent to conv2d with groups = Cin."
+
+  # ---------------------------------------------------------------------------
+  # Elementwise Unary
+  # ---------------------------------------------------------------------------
+  relu:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  leaky_relu:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    attributes:
+      - name: alpha
+        type: float
+        required: true
+        description: "Slope for negative values"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  sigmoid:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  tanh:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  exp:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  log:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  sqrt:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  abs:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  neg:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  gelu:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+    notes: "Gaussian Error Linear Unit activation."
+
+  silu:
+    category: elementwise_unary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+    notes: "Sigmoid Linear Unit activation (swish)."
+
+  # ---------------------------------------------------------------------------
+  # Elementwise Binary
+  # ---------------------------------------------------------------------------
+  add:
+    category: elementwise_binary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "First operand"
+      - name: B
+        direction: in
+        required: true
+        role: "Second operand"
+        constraints: "Same shape as A"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as A"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  sub:
+    category: elementwise_binary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "First operand"
+      - name: B
+        direction: in
+        required: true
+        role: "Second operand"
+        constraints: "Same shape as A"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as A"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  mul:
+    category: elementwise_binary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "First operand"
+      - name: B
+        direction: in
+        required: true
+        role: "Second operand"
+        constraints: "Same shape as A"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as A"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  div:
+    category: elementwise_binary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "First operand"
+      - name: B
+        direction: in
+        required: true
+        role: "Second operand"
+        constraints: "Same shape as A"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as A"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  min:
+    category: elementwise_binary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "First operand"
+      - name: B
+        direction: in
+        required: true
+        role: "Second operand"
+        constraints: "Same shape as A"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as A"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  max:
+    category: elementwise_binary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "First operand"
+      - name: B
+        direction: in
+        required: true
+        role: "Second operand"
+        constraints: "Same shape as A"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as A"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  pow:
+    category: elementwise_binary
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: A
+        direction: in
+        required: true
+        role: "First operand"
+      - name: B
+        direction: in
+        required: true
+        role: "Second operand"
+        constraints: "Same shape as A"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as A"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  # ---------------------------------------------------------------------------
+  # Elementwise Other
+  # ---------------------------------------------------------------------------
+  clamp:
+    category: elementwise_other
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    attributes:
+      - name: min_val
+        type: float
+        required: true
+        description: "Lower clamp bound"
+      - name: max_val
+        type: float
+        required: true
+        description: "Upper clamp bound"
+    type_families: [eltwise]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  # ---------------------------------------------------------------------------
+  # Pooling
+  # ---------------------------------------------------------------------------
+  maxpool:
+    category: pooling
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+        constraints: "Rank 4, layout NHWC"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Shape derived from X, kernel_shape, pads, strides"
+    attributes:
+      - name: kernel_shape
+        type: int_list
+        required: true
+      - name: pads
+        type: int_list
+        required: true
+      - name: strides
+        type: int_list
+        required: true
+    execution_unit: CSTL
+    hardware_status: supported
+
+  avgpool:
+    category: pooling
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+        constraints: "Rank 4, layout NHWC"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Shape derived from X, kernel_shape, pads, strides"
+    attributes:
+      - name: kernel_shape
+        type: int_list
+        required: true
+      - name: pads
+        type: int_list
+        required: true
+      - name: strides
+        type: int_list
+        required: true
+    execution_unit: CSTL
+    hardware_status: supported
+
+  # ---------------------------------------------------------------------------
+  # Layout
+  # ---------------------------------------------------------------------------
+  transpose:
+    category: layout
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: perm
+        type: int_list
+        required: true
+        description: "Permutation of dimensions"
+    type_families: [view]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  reshape:
+    category: layout
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: target_shape
+        type: int_list
+        required: true
+        description: "Target tensor shape"
+    type_families: [view]
+    execution_unit: CSTL
+    hardware_status: supported
+    notes: "Element count MUST be preserved."
+
+  slice:
+    category: layout
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: starts
+        type: int_list
+        required: true
+      - name: ends
+        type: int_list
+        required: true
+      - name: axes
+        type: int_list
+        required: true
+      - name: steps
+        type: int_list
+        required: true
+    type_families: [view]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  concat:
+    category: layout
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input tensors"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+    type_families: [view]
+    execution_unit: CSTL
+    hardware_status: supported
+    variadic_inputs: true
+    notes: "Accepts variable number of input operands."
+
+  split:
+    category: layout
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output tensors"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+      - name: split_sizes
+        type: int_list
+        required: true
+    type_families: [view]
+    execution_unit: CSTL
+    hardware_status: supported
+    variadic_outputs: true
+    notes: "Produces variable number of output operands."
+
+  pad:
+    category: layout
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: pads
+        type: int_list
+        required: true
+        description: "Padding amounts per dimension"
+      - name: mode
+        type: id
+        required: true
+        description: "Padding mode"
+      - name: constant_value
+        type: float
+        required: false
+        default: 0
+        description: "Fill value for constant mode"
+    type_families: [view]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  gather:
+    category: layout
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: indices
+        direction: in
+        required: true
+        role: "Index tensor"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+    type_families: [view]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  # ---------------------------------------------------------------------------
+  # Reduction
+  # ---------------------------------------------------------------------------
+  reduce_sum:
+    category: reduction
+    status: future
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: axes
+        type: int_list
+        required: true
+      - name: keepdims
+        type: bool
+        required: true
+    execution_unit: CSTL
+    hardware_status: future
+
+  reduce_max:
+    category: reduction
+    status: future
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: axes
+        type: int_list
+        required: true
+      - name: keepdims
+        type: bool
+        required: true
+    execution_unit: CSTL
+    hardware_status: future
+
+  reduce_min:
+    category: reduction
+    status: future
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    attributes:
+      - name: axes
+        type: int_list
+        required: true
+      - name: keepdims
+        type: bool
+        required: true
+    execution_unit: CSTL
+    hardware_status: future
+
+  argmax:
+    category: reduction
+    status: future
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Integer index type"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+      - name: keepdims
+        type: bool
+        required: true
+    execution_unit: CSTL
+    hardware_status: future
+
+  argmin:
+    category: reduction
+    status: future
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Integer index type"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+      - name: keepdims
+        type: bool
+        required: true
+    execution_unit: CSTL
+    hardware_status: future
+
+  # ---------------------------------------------------------------------------
+  # Normalization
+  # ---------------------------------------------------------------------------
+  layernorm:
+    category: normalization
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+        constraints: "Any rank"
+      - name: scale
+        direction: in
+        required: false
+        role: "Per-element scale"
+        constraints: "Shape [dim[axis]]"
+      - name: bias
+        direction: in
+        required: false
+        role: "Per-element bias"
+        constraints: "Shape [dim[axis]]"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+      - name: epsilon
+        type: float
+        required: true
+        description: "Numerical stability constant"
+    type_families: [norm]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  rmsnorm:
+    category: normalization
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+        constraints: "Any rank"
+      - name: scale
+        direction: in
+        required: false
+        role: "Per-element scale"
+        constraints: "Shape [dim[axis]]"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+      - name: epsilon
+        type: float
+        required: true
+        description: "Numerical stability constant"
+    type_families: [norm]
+    execution_unit: CSTL
+    hardware_status: supported
+    notes: "RMS normalization omits mean subtraction and bias."
+
+  # ---------------------------------------------------------------------------
+  # Softmax
+  # ---------------------------------------------------------------------------
+  softmax:
+    category: softmax
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+        constraints: "Any rank"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+    type_families: [softmax]
+    execution_unit: CSTL
+    hardware_status: supported
+
+  log_softmax:
+    category: softmax
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+        constraints: "Any rank"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+        constraints: "Same shape as X"
+    attributes:
+      - name: axis
+        type: int
+        required: true
+    type_families: [softmax]
+    execution_unit: CSTL
+    hardware_status: supported
+    notes: "Computes log(softmax(X)) — numerically more stable than composing log and softmax."
+
+  # ---------------------------------------------------------------------------
+  # Type Conversion
+  # ---------------------------------------------------------------------------
+  cast:
+    category: type_conversion
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    type_families: [cast]
+    execution_unit: CSTL
+    hardware_status: partial
+    notes: "Converts between any supported element types."
+
+  quantize:
+    category: type_conversion
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    type_families: [quantize]
+    execution_unit: CSTL
+    hardware_status: partial
+    notes: "Output region MUST carry a quantization descriptor."
+
+  dequantize:
+    category: type_conversion
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Input"
+      - name: Y
+        direction: out
+        required: true
+        role: "Output"
+    type_families: [dequantize]
+    execution_unit: CSTL
+    hardware_status: partial
+    notes: "Source region MUST carry a quantization descriptor."
+
+  # ---------------------------------------------------------------------------
+  # Generic
+  # ---------------------------------------------------------------------------
+  compute:
+    category: generic
+    status: stable
+    forms: [async, sync]
+    operands:
+      - name: X
+        direction: in
+        required: true
+        role: "Variable inputs"
+      - name: Y
+        direction: out
+        required: true
+        role: "Variable outputs"
+    attributes:
+      - name: op
+        type: string
+        required: true
+        description: "Operation name string"
+    hardware_status: escape_hatch
+    variadic_inputs: true
+    variadic_outputs: true
+    notes: "Forward compatibility escape hatch. Binders MAY reject unknown operations."

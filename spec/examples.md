@@ -72,10 +72,28 @@ include "nem_baseline_1.0.nem"
 device npm_lite extends nem_baseline_1_0 {
     topology {
         num_engines = 1
+        l2_size_bytes = 1048576          # 1 MB L2
+        device_units {
+            sDMA = 1
+            WDM  = 0                     # no weight decompression
+        }
         per_engine {
             NMU  = 1
             CSTL = 2
             DMA  = 2
+            VPU  = 1
+            SEQ  = 1
+            l1_size_bytes = 524288       # 512 KB L1
+        }
+    }
+
+    unit_characteristics {
+        NMU {
+            int8_macs = 4096
+            fp16_macs = 2048
+        }
+        SEQ {
+            max_active_tokens = 16
         }
     }
 
@@ -191,10 +209,28 @@ include "nem_baseline_1.0.nem"
 device npm_quad_cstl extends nem_baseline_1_0 {
     topology {
         num_engines = 1
+        l2_size_bytes = 2097152          # 2 MB L2
+        device_units {
+            sDMA = 2
+            WDM  = 0
+        }
         per_engine {
             NMU  = 1
             CSTL = 4
             DMA  = 4
+            VPU  = 1
+            SEQ  = 1
+            l1_size_bytes = 1048576      # 1 MB L1
+        }
+    }
+
+    unit_characteristics {
+        NMU {
+            int8_macs = 4096
+            fp16_macs = 2048
+        }
+        SEQ {
+            max_active_tokens = 16
         }
     }
 

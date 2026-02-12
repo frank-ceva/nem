@@ -15,7 +15,6 @@
     { "include": "#keyword-typefamily" },
     { "include": "#element-type" },
     { "include": "#memory-level" },
-    { "include": "#execution-unit" },
     { "include": "#attribute-name" },
     { "include": "#number" },
     { "include": "#operator" },
@@ -71,7 +70,7 @@
     },
     "compute-opcode": {
       "comment": "Compute opcodes followed by .async or .sync",
-      "match": "\\b(gemm|matmul|conv2d|conv1d|conv3d|depthwise_conv2d|relu|leaky_relu|sigmoid|tanh|exp|log|sqrt|abs|neg|add|sub|mul|div|min|max|pow|clamp|maxpool|avgpool|transpose|reshape|slice|concat|split|pad|gather|reduce_sum|reduce_max|reduce_min|argmax|argmin|cast|quantize|dequantize|compute)\\.(async|sync)\\b",
+      "match": "\\b(gemm|matmul|conv2d|conv1d|conv3d|depthwise_conv2d|relu|leaky_relu|sigmoid|tanh|exp|log|sqrt|abs|neg|gelu|silu|add|sub|mul|div|min|max|pow|clamp|maxpool|avgpool|transpose|reshape|slice|concat|split|pad|gather|reduce_sum|reduce_max|reduce_min|argmax|argmin|layernorm|rmsnorm|softmax|log_softmax|cast|quantize|dequantize|compute)\\.(async|sync)\\b",
       "captures": {
         "1": { "name": "entity.name.function.opcode.nem" },
         "2": { "name": "keyword.other.async-sync.nem" }
@@ -79,16 +78,16 @@
     },
     "keyword-control": {
       "name": "keyword.control.nem",
-      "match": "\\b(program|loop|endloop|in|include|wait)\\b"
+      "match": "\\b(program|loop|endloop|in|out|include|wait)\\b"
     },
     "keyword-declaration": {
       "name": "keyword.declaration.nem",
-      "match": "\\b(buffer|region|let|device)\\b"
+      "match": "\\b(buffer|region|let|const|device)\\b"
     },
     "keyword-task": {
-      "comment": "IN/OUT operand markers (uppercase only)",
+      "comment": "Quantization descriptor keywords",
       "name": "keyword.other.task.nem",
-      "match": "\\b(IN|OUT)\\b"
+      "match": "\\b(per_tensor|per_channel|per_group)\\b"
     },
     "keyword-config": {
       "patterns": [
@@ -99,13 +98,13 @@
         },
         {
           "name": "keyword.other.config.nem",
-          "match": "\\b(topology|per_engine|num_engines|spec_version|extends)\\b"
+          "match": "\\b(topology|per_engine|num_engines|spec_version|extends|device_units|l1_size_bytes|l2_size_bytes|unit_characteristics)\\b"
         }
       ]
     },
     "keyword-typefamily": {
       "name": "keyword.other.typefamily.nem",
-      "match": "\\b(type_family|variants|conformance|MUST|MAY|absent|required)\\b"
+      "match": "\\b(type_family|variants|conformance|MUST|MAY|absent|required|any_supported)\\b"
     },
     "element-type": {
       "name": "storage.type.nem",
@@ -117,19 +116,29 @@
     },
     "execution-unit": {
       "name": "constant.language.unit.nem",
-      "match": "\\b(NMU|CSTL|DMA)\\b"
+      "match": "\\b(NMU|CSTL|DMA|VPU|SEQ|sDMA|WDM)\\b"
     },
     "attribute-name": {
       "comment": "Named attributes: key= pattern",
-      "match": "\\b(dst|src|deps|elem|shape|layout|strides|quant|accum_type|pads|dilations|groups|kernel_shape|alpha|perm|target_shape|axis|keepdims|mode|constant_value|split_sizes|min_val|max_val|starts|ends|axes|steps|size|align|op|attrs)\\s*(=)",
+      "match": "\\b(dst|src|deps|elem|shape|layout|strides|quant|accum_type|pads|dilations|groups|kernel_shape|alpha|epsilon|perm|target_shape|axis|keepdims|mode|constant_value|split_sizes|min_val|max_val|starts|ends|axes|steps|size|align|op|attrs|scale|zero_point|group_size|scales|zero_points)\\s*(=)",
       "captures": {
         "1": { "name": "variable.parameter.nem" },
         "2": { "name": "keyword.operator.assignment.nem" }
       }
     },
     "number": {
-      "name": "constant.numeric.nem",
-      "match": "\\b[0-9]+\\b"
+      "patterns": [
+        {
+          "comment": "Float literal: 1.0, 0.00001, 1.0e-5",
+          "name": "constant.numeric.float.nem",
+          "match": "\\b[0-9]+\\.[0-9]+(?:[eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "comment": "Integer literal",
+          "name": "constant.numeric.integer.nem",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
     },
     "operator": {
       "patterns": [

@@ -4,6 +4,53 @@ Completed work items are recorded here.
 
 ---
 
+# Extract opcode definitions into a machine-readable registry
+status=completed
+
+Extracted all NEM opcode signatures from spec prose into a machine-readable YAML registry, updated the spec to reference it normatively, and created the supporting infrastructure.
+
+## Summary
+
+### Format decision: YAML
+- Chose YAML over NEM syntax to avoid circular dependency (NEM parsers don't exist yet).
+- JSON Schema (`spec/registry/schema.json`) enforces structural validity.
+- Pragmatic migration path to NEM syntax once parsers are mature.
+
+### Registry created (`spec/registry/opcodes.yaml`)
+- 49 opcodes across 13 categories: data_movement (2), linear_algebra (2), convolution (4), elementwise_unary (11), elementwise_binary (7), elementwise_other (1), pooling (2), layout (7), reduction (5), normalization (2), softmax (2), type_conversion (3), generic (1).
+- Per-opcode fields: category, status, forms (async/sync), operands (name, direction, required, role, constraints), attributes (name, type, required, default), type_families, execution_unit, hardware_status.
+- 41 stable opcodes, 8 future opcodes.
+- All type_family references validated against `examples/npm_baseline_1.0.nem` (13 families).
+- All opcodes used in example `.nem` files have registry entries.
+
+### Validation infrastructure
+- `spec/registry/schema.json` — JSON Schema draft 2020-12
+- `spec/registry/validate.py` — validates schema conformance + cross-references
+- `registry/README.md` — usage documentation
+- `tests/conformance/registry/test_registry.py` — pytest conformance suite (structure, schema, cross-references, category coverage)
+
+### Spec update (`spec/nem_spec.md`)
+- Replaced ~280-line inline "Opcode Signatures (Normative)" section with a normative reference to `spec/registry/opcodes.yaml`.
+- Kept Task Taxonomy, Type Legality, Type Family Grammar, Hardware Support Status, and Appendix sections unchanged.
+- Spec now delegates opcode catalog to registry; retains semantic rules.
+
+### Contract (`docs/contracts/opcode-registry.md`)
+- Documents normative status, schema, tool consumption patterns, change process, versioning.
+- Added to `docs/contracts/README.md` inventory.
+
+### Tool propagation
+- Added "Consume opcode registry" work item (top priority) to:
+  - `tools/interpreter/work.md`
+  - `tools/compiler/work.md`
+  - `tools/binder/work.md`
+  - `tools/simulator/work.md`
+- VSCode extension noted for future syntax highlighting generation from registry.
+
+### Changelog
+- Updated `spec/CHANGELOG.md` with detailed entry.
+
+---
+
 # Multi-agent workflow
 status=completed
 
@@ -247,3 +294,57 @@ Reviewed all NEM code across the project (standalone .nem files and embedded exa
 - `spec/comparison_tables.md` — No NEM code
 - `docs/architecture/domain-specific-framework-analysis.md` — No NEM code
 - `tools/interpreter/interpreter_spec.md` — Python API snippets only, not full NEM programs
+
+---
+
+# Extend NEM device model for full NPM architectural coverage
+status=completed
+
+Extended the NEM specification's device configuration model, opcode set, and type system to cover the full NPM hardware architecture. Decomposed into 4 work items (A-D) with 8 architectural decisions.
+
+## Summary
+
+### Work Item A: Device Topology and Unit Model
+- Extended Execution Units section with Per-Engine table (NMU, CSTL, DMA, VPU, SEQ) and Device-Level table (sDMA, WDM)
+- Added sDMA (DDR↔L2 transfers), WDM (weight decompression), VPU (programmable vector), SEQ (sequencer) descriptions
+- Extended `unit_type` grammar: added VPU, SEQ, sDMA, WDM
+- Extended `topology_block` grammar: added `l2_size_bytes`, `device_units_block`, `l1_size_bytes`
+- Added `unit_characteristics` grammar: per-unit-type key-value properties (e.g., NMU.int8_macs, SEQ.max_active_tokens)
+- Added @resource-invalid rule: SEQ, sDMA, WDM are NOT valid @resource targets
+- Updated Schema Rules: unit counts, memory capacity, MUST variants
+- Updated Inheritance Rules: 8 rules (was 7), added unit_characteristics merge inheritance
+- Updated all device config examples in spec, examples.md, and standalone .nem files
+
+### Work Item B: New Opcodes
+- Added FLOAT literal grammar: `FLOAT ::= DIGIT+ "." DIGIT+ ( [eE] [+-]? DIGIT+ )?`
+- Extended `primary` to accept FLOAT (restricted to compute attributes only)
+- Added 6 new opcodes: `layernorm`, `rmsnorm`, `softmax`, `log_softmax`, `gelu`, `silu`
+- Added `norm<T>` type family (MUST f16, MAY bf16/f32) covering layernorm/rmsnorm
+- Added `softmax<T>` type family (MUST f16, MAY bf16/f32) covering softmax/log_softmax
+- gelu/silu reuse existing `eltwise<T>` family (AD-5)
+- Updated NPM Hardware Support Status, Priority tables, MUST/MAY Variant tables
+- Updated baseline device file with norm/softmax type families and MUST variants
+
+### Work Item C: Type System Extensions
+- Formalized `quant_desc` grammar: `per_tensor_quant`, `per_channel_quant`, `per_group_quant` productions
+- Added per-group quantization: `per_group(axis, group_size, scales[], zero_points[])`
+- Added `gemm.int4` type family: non-parameterized, i4 weights × i8 activations, MAY-class
+- Added `conv2d.int4` type family: non-parameterized, i4 weights × i8 activations, MAY-class
+- Updated MAY Variant Inventory, Hardware Support Status, Priority tables
+- Updated baseline device file with INT4 type family definitions
+
+### Work Item D: Examples, Baseline Update, and Tool Propagation
+- Verified baseline device file: 13 type families, 17 MUST variants
+- Created `examples/gemm_rmsnorm.nem`: GEMM + RMSNorm transformer MLP pipeline
+- Added 10 conformance test files (43 test cases) across device_config, opcodes, types directories
+- Created tool propagation work items in all 4 tool work.md files
+
+### Architectural Decisions
+- AD-1: @resource-invalid unit types (SEQ, sDMA, WDM)
+- AD-2: Device-level units are informational for the binder
+- AD-3: Memory sizes as required fields (breaking change)
+- AD-4: Unit characteristics merge inheritance
+- AD-5: gelu/silu reuse eltwise type family
+- AD-6: INT4 type families use non-parameterized form
+- AD-7: quant_desc grammar formalization
+- AD-8: FLOAT literal grammar extension

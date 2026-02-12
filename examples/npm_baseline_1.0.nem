@@ -81,6 +81,38 @@ type_family gemm.int8<T_out: {i8, i16}> {
         conformance: { MUST <i8>   MAY <i16> }
 }
 
+# ── Convolution (INT4 Mixed-Precision) ─────────────────────────
+
+type_family conv2d.int4 {
+    X: i8
+    W: i4
+    Y: i8
+    accum = i32
+    quant = required
+
+    variants:
+      no_bias: { B: absent }
+        conformance: { MAY }
+      with_bias: { B: i32 }
+        conformance: { MAY }
+}
+
+# ── Linear Algebra (INT4 Mixed-Precision) ─────────────────────
+
+type_family gemm.int4 {
+    A: i8
+    B: i4
+    Y: i8
+    accum = i32
+    quant = required
+
+    variants:
+      no_bias: { C: absent }
+        conformance: { MAY }
+      with_bias: { C: i32 }
+        conformance: { MAY }
+}
+
 # ── Elementwise ─────────────────────────────────────────────────
 
 type_family eltwise<T: {i8, i16, i32, f16, bf16, f32}> {
@@ -101,6 +133,28 @@ type_family view<T: {i8, i16, i32, f16, bf16, f32}> {
     variants:
       default: {}
         conformance: { MUST <i8>   MUST <f16>   MAY <i16>   MAY <i32>   MAY <bf16>   MAY <f32> }
+}
+
+# ── Normalization ──────────────────────────────────────────────
+
+type_family norm<T: {f16, bf16, f32}> {
+    input: T
+    output: T
+
+    variants:
+      default: {}
+        conformance: { MUST <f16>   MAY <bf16>   MAY <f32> }
+}
+
+# ── Softmax ────────────────────────────────────────────────────
+
+type_family softmax<T: {f16, bf16, f32}> {
+    input: T
+    output: T
+
+    variants:
+      default: {}
+        conformance: { MUST <f16>   MAY <bf16>   MAY <f32> }
 }
 
 # ── Type Conversion ─────────────────────────────────────────────
@@ -169,6 +223,12 @@ device npm_baseline_1_0 {
         # View / Layout — MUST variants
         view<i8>.default
         view<f16>.default
+
+        # Normalization — MUST variants
+        norm<f16>.default
+
+        # Softmax — MUST variants
+        softmax<f16>.default
 
         # Type Conversion — MUST variants
         cast.default
