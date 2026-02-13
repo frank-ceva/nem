@@ -1,119 +1,69 @@
 This file lists all major work items to be worked on, or currently being worked on, in priority order: the upper one is the first to work on.
 
-# Consume opcode registry
+# Phase 1, Step 1: Project Setup
 
-**Requested by: spec-int (Extract opcode definitions into a machine-readable registry)**
+**Plan reference:** `plan/phase_1/interpreter.md` Step 1, `plan/phase_1/master.md`
 
-The NEM spec now delegates opcode signatures to `spec/registry/opcodes.yaml`. See `spec/CHANGELOG.md` and `docs/contracts/opcode-registry.md`.
+Set up the interpreter package. No functional code yet — wait for nemlib parser to be available from the libs agent.
 
-The interpreter should:
-- Load `spec/registry/opcodes.yaml` at initialization instead of hardcoding opcode tables.
-- Use registry data for operand validation (count, direction, required/optional).
-- Use registry data for attribute validation (type, required, defaults).
-- Use `type_families` references for type legality checks against the active device config.
-- Validate the registry against `spec/registry/schema.json` on load (optional, for development builds).
+## Tasks
+
+- `tools/interpreter/pyproject.toml` — package metadata, dependencies (nemlib as path dep, numpy, scipy), dev deps (pytest, mypy, ruff)
+- `tools/interpreter/neminterp/__init__.py` — skeleton with version
+- `tools/interpreter/neminterp/py.typed` — PEP 561 marker
+- Verify: `pip install -e tools/interpreter[dev]` succeeds
+
+## Completion criteria
+
+- Package installs in editable mode
+- `import neminterp` succeeds
+- Empty test suite runs green
 
 ---
 
-# Extend NEM device model and add new opcodes
+# Phase 1, Step 2: Memory Model
 
-**Requested by: spec-int (Extend NEM device model for full NPM architectural coverage)**
+**Plan reference:** `plan/phase_1/interpreter.md` Step 2
 
-The NEM spec has been significantly extended. See `spec/CHANGELOG.md` entries dated 2026-02-12 for:
-- Device Topology and Unit Model
-- New Opcodes (softmax, layernorm, rmsnorm, gelu, silu)
-- Type System Extensions (INT4, per-group quantization)
+Build the memory subsystem. Depends on nemlib parser for buffer/region declarations (libs agent Step 2).
 
-The interpreter must support:
+## Modules
 
-## Parser changes
+- `memory/memory_model.py` — MemorySystem: DDR, L2, per-engine L1 as bytearray
+- `memory/buffer_manager.py` — BufferManager: allocation with alignment, bounds checking
+- `memory/region.py` — RegionView: typed view into buffer, read_array()/write_array(), i4 packing
 
-1. **FLOAT literal**: New lexical token `FLOAT`. Extend `primary` to accept FLOAT. FLOAT is valid only in compute attribute values (epsilon, alpha).
-2. **Extended topology_block**: `l2_size_bytes`, `device_units` block (sDMA, WDM counts), `l1_size_bytes` in per_engine.
-3. **New unit_type values**: `VPU`, `SEQ`, `sDMA`, `WDM` (in addition to existing NMU, CSTL, DMA).
-4. **unit_characteristics block**: Per-unit-type key-value attributes in device configs.
-5. **quant_desc grammar**: Formalize `per_tensor`, `per_channel`, `per_group` quantization descriptor productions.
-6. **New opcodes**: `layernorm`, `rmsnorm`, `softmax`, `log_softmax`, `gelu`, `silu`.
-7. **New type families**: `norm<T>`, `softmax<T>`, `gemm.int4`, `conv2d.int4`.
+## Tests
 
-## Semantic analysis changes
+- Buffer allocation, alignment, bounds
+- Region read/write round-trip
+- i4 sub-byte packing
 
-1. **@resource validation**: SEQ, sDMA, WDM are NOT valid @resource targets (static error).
-2. **Memory capacity rule**: Sum of buffer sizes at a given level MUST NOT exceed declared capacity.
-3. **unit_characteristics inheritance**: Merge semantics (per-key override within unit type).
-4. **FLOAT restriction**: FLOAT literals only in compute attributes, not in buffer sizes/region offsets/shapes/loop bounds/const.
-5. **Normalization validation**: `epsilon` (FLOAT, required), `axis` (INT, required), optional scale/bias operands.
-6. **Softmax validation**: `axis` (INT, required), shapes must match.
-7. **INT4 type family checking**: `gemm.int4` and `conv2d.int4` with fixed type combinations.
-8. **Per-group quant validation**: `group_size` must be positive, array lengths must equal ⌈dim[axis]/group_size⌉.
+---
 
-## Runtime changes
+# Phase 1, Steps 3-8: Execution Engine through Validation
 
-1. **New opcode execution**: Implement `layernorm`, `rmsnorm`, `softmax`, `log_softmax`, `gelu`, `silu` in compute backend.
-2. **INT4 compute**: Support i4 × i8 mixed-precision GEMM and Conv2D.
-3. **Per-group dequantization**: Support per-group quant descriptor unpacking.
+**Plan reference:** `plan/phase_1/interpreter.md` Steps 3-8
 
-## Conformance
+Subsequent steps (data movement, loops, compute, device integration, remaining opcodes, validation) are defined in the plan. Each step will be broken into detailed tasks when the previous step is complete.
 
-Pass all tests in:
-- `tests/conformance/device_config/`
-- `tests/conformance/opcodes/`
-- `tests/conformance/types/`
+Summary:
+- Step 3: Task graph, scheduler, executor (transfer/store/wait)
+- Step 4: Loop execution, max_in_flight, variable binding
+- Step 5: Compute backend, NumPy implementations (all elementwise, gemm, conv2d)
+- Step 6: Device config loading, device-aware execution
+- Step 7: Remaining opcodes (pooling, norm, softmax, layout, cast, quant, INT4)
+- Step 8: Validation pipeline wiring, decorator enforcement
 
-## Spec references
+---
 
-- Affected sections: Execution Units, Decorators, Device Configuration, Formal Language Definition (Grammar), Opcode Signatures, Type System, Appendix
-- Changelog: `spec/CHANGELOG.md` — 3 entries dated 2026-02-12
+# Prior work items (subsumed by Phase 1 plan)
 
-# NEM interpreter
-**Current phase: Architecture spec written** — see [interpreter_spec.md](interpreter_spec.md)
+The following items were created before the Phase 1 plan existed. They are now addressed by specific steps in the plan:
 
-I need to build a NEM interpreter that is capable of executing NEM programs and/or instructions.
-I want the interpreter to be built as a python library so that I benefit from all the existing python environment.
-The interpreter needs to ensure:
-- correct functional behavior
-- check for language rules
-All as defined in the NEM spec (nem_spec.md)
-To help building the interpreter, a python library of all NMU and CSTL compute functions is available and provides bit-true accuracy vs actual hardware.
+- **Consume opcode registry** → Phase 1 Step 5 (libs agent builds opcodes.py loader; interpreter uses it)
+- **Extend device model and add new opcodes** → Phase 1 Steps 6-7
+- **Add const declaration support** → Phase 1 Step 1 (libs agent builds parser; interpreter benefits automatically via nemlib)
+- **Architecture spec** → status=completed (see interpreter_spec.md)
 
-## Completed: Architecture Specification
-status=completed
-
-Architecture specification written in interpreter_spec.md, covering:
-- [x] User interface (Python API: load, run, step, inspect, display buffers, breakpoints)
-- [x] Threading model (cooperative single-threaded event loop, task graph + ready queue, multi-engine modeling)
-- [x] Execution modes: functional (dependency-only) and timed (resource-aware abstract scheduling) — single implementation with mode switch recommended
-- [x] Device specification integration (parsing, inheritance resolution, effective type family set, topology enforcement)
-- [x] Runtime test environment (DDR/L2/L1 as sized byte arrays, DDR pre-loading/post-read API)
-- [x] Compute backend architecture (pluggable: NumPy fallback + NpmPyTorchApi bit-true backend)
-- [x] Parser design (recursive descent, full EBNF grammar coverage)
-- [x] Semantic analysis (10 validation passes)
-- [x] Testing strategy and implementation roadmap (7 phases)
-
-## Add `const` declaration support
-
-**Requested by: spec-int (const declarations work item)**
-
-The NEM spec now includes `const` declarations (see `spec/CHANGELOG.md`). The interpreter must support:
-
-1. **Parser**: Add `const_decl` production: `"const" ID "=" expr`. Add to `decl` alternatives.
-2. **AST**: Add `ConstDeclNode(name, expr)` node type.
-3. **Semantic analysis**:
-   - Evaluate constant expressions at parse/analysis time (integer literals + previously-declared constants + `+`, `-`, `*`, `/`, `mod`, parens).
-   - Reject forward references (ID not yet declared as const).
-   - Reject duplicate const names.
-   - Reject `const` inside loop bodies.
-   - Reject name conflicts with buffers, let bindings, token assignments.
-   - Reject division by zero.
-4. **Runtime**: Substitute constant values in all `expr` evaluation contexts (buffer sizes, region offsets/extents, shape dims, loop bounds, compute attributes).
-5. **Conformance**: Pass all tests in `tests/conformance/const/`.
-
-## Remaining: Implementation
-The following implementation phases are defined in the spec:
-- Phase 1: Core Infrastructure (lexer, parser, AST, device config, memory model)
-- Phase 2: Functional Execution (task graph, scheduler, compute backends)
-- Phase 3: Semantic Analysis (type families, hazard checking)
-- Phase 4: User Interface (NemInterpreter class, DDR management, inspection)
-- Phase 5: Timed Mode (cost model, resource contention)
-- Phase 6: NpmPyTorchApi Integration (bit-true compute)
-- Phase 7: Polish (Jupyter, error messages, packaging)
+---
