@@ -1,26 +1,5 @@
 This file lists all major work items to be worked on, or currently being worked on, in priority order: the upper one is the first to work on.
 
-# Phase 1, Step 1: Project Setup
-
-**Plan reference:** `plan/phase_1/interpreter.md` Step 1, `plan/phase_1/master.md`
-
-Set up the interpreter package. No functional code yet — wait for nemlib parser to be available from the shared agent.
-
-## Tasks
-
-- `tools/interpreter/pyproject.toml` — package metadata, dependencies (nemlib as path dep, numpy, scipy), dev deps (pytest, mypy, ruff)
-- `tools/interpreter/neminterp/__init__.py` — skeleton with version
-- `tools/interpreter/neminterp/py.typed` — PEP 561 marker
-- Verify: `pip install -e tools/interpreter[dev]` succeeds
-
-## Completion criteria
-
-- Package installs in editable mode
-- `import neminterp` succeeds
-- Empty test suite runs green
-
----
-
 # Phase 1, Step 2: Memory Model
 
 **Plan reference:** `plan/phase_1/interpreter.md` Step 2
