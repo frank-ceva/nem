@@ -1,6 +1,6 @@
 # Shared Libraries
 
-This directory contains code shared across multiple tools. It is **libs-agent-owned** — tool agents must not modify it directly. The integration agent reviews all changes but does not build code here.
+This directory contains code shared across multiple tools. It is **shared-agent-owned** — tool agents must not modify it directly. The integration agent reviews all changes but does not build code here.
 
 ## When to Extract Shared Code
 
@@ -25,7 +25,7 @@ Tool agents cannot create or modify files in `libs/` directly. To propose shared
    * The code to be shared (or a reference to existing implementations in tools).
    * Which tools would use it.
    * The proposed API surface.
-3. The libs agent will implement the library; the integration agent will review and merge.
+3. The shared agent will implement the library; the integration agent will review and merge.
 
 ## Structure
 

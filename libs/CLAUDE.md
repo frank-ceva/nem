@@ -1,12 +1,12 @@
 ## Role
 
-The libs agent builds the **shared library (nemlib)** used by all NEM tools, plus test infrastructure and build configuration.
+The shared agent builds the **shared library (nemlib)** used by all NEM tools, plus test infrastructure, examples, and build configuration.
 Correctness, API clarity, and zero runtime dependencies take precedence over performance.
 
 You MAY modify code under the following paths:
 - `libs/**`
-- `tests/conformance/runner.py`, `tests/conformance/conftest.py`, `tests/conformance/runners/**`
-- `tests/conformance/` test files (wiring test stubs to call `runner.validate()` / `runner.execute()`)
+- `tests/**` (conformance runner framework, test fixtures, conformance test wiring)
+- `examples/**`
 - Root `Makefile`
 - Root-level `pyproject.toml` files (if any)
 
@@ -40,6 +40,6 @@ nemlib follows a 6-layer dependency model (see `docs/architecture/common-infrast
 
 ## Git Workflow
 
-- Branch: `agent/libs/main`
-- Feature branches: `agent/libs/feat/step-N-<description>`
+- Branch: `agent/shared/main`
+- Feature branches: `agent/shared/feat/step-N-<description>`
 - PRs target `integration/main` — the integration agent reviews and merges

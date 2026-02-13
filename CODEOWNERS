@@ -1,17 +1,18 @@
 # CODEOWNERS — defines ownership for review assignment
 #
 # Tool agents own their tool directories.
-# Libs agent owns shared libraries, test infrastructure, and build config.
+# Shared agent owns shared libraries, test infrastructure, build config, examples, and tests.
 # Integration agent owns contracts, spec, and has review authority over all shared areas.
 
 # Integration-owned (require integration agent review)
 /docs/contracts/         @integration
 /spec/                   @integration
 
-# Libs-agent-owned (require libs agent + integration agent review)
-/libs/                   @libs-agent @integration
-/tests/conformance/      @libs-agent @integration
-/Makefile                @libs-agent @integration
+# Shared-agent-owned (require shared agent + integration agent review)
+/libs/                   @shared-agent @integration
+/tests/                  @shared-agent @integration
+/examples/               @shared-agent @integration
+/Makefile                @shared-agent @integration
 
 # Tool-owned
 /tools/interpreter/      @interpreter-agent

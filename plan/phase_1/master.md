@@ -53,7 +53,7 @@ Step 7: Remaining Ops + Type Extensions
 Step 8: Semantic Analysis + Decorators
 ```
 
-**Key parallelism opportunity**: Steps 3-5 (execution path) and Step 6 (device config) are independent tracks. The interpreter agent works on execution while the libs agent builds device support in nemlib. They converge at Step 7.
+**Key parallelism opportunity**: Steps 3-5 (execution path) and Step 6 (device config) are independent tracks. The interpreter agent works on execution while the shared agent builds device support in nemlib. They converge at Step 7.
 
 ## Agent Model
 
@@ -61,15 +61,15 @@ Three agents collaborate in Phase 1:
 
 | Agent | Role | Builds Code? |
 |-------|------|-------------|
-| **Libs agent** | Builds shared library (nemlib), test infrastructure, build infra | Yes |
+| **Shared agent** | Builds shared library (nemlib), test infrastructure, build infra, examples | Yes |
 | **Interpreter agent** | Builds interpreter-specific code | Yes |
 | **Integration agent** | Runs cross-component tests, validates, reports failures, merges PRs | No (read-only) |
 
-The libs agent and interpreter agent are **builders**. The integration agent is a **quality gate** — it never writes production code, only runs tests, validates cross-component consistency, and reports failures back to the responsible builder agent.
+The shared agent and interpreter agent are **builders**. The integration agent is a **quality gate** — it never writes production code, only runs tests, validates cross-component consistency, and reports failures back to the responsible builder agent.
 
 ## Agent Responsibilities
 
-| Step | Libs Agent | Interpreter Agent | Integration Agent |
+| Step | Shared Agent | Interpreter Agent | Integration Agent |
 |------|------------|-------------------|-------------------|
 | 1 | nemlib setup, diagnostics, core, lexer, parser (const), conformance infra, Makefile | Interpreter project setup | Validate: both packages install, const conformance passes |
 | 2 | Parser (buffers, regions, types), decorators (syntax) | Memory model, buffer manager, region views | Validate: interpreter builds against latest nemlib |
@@ -84,9 +84,9 @@ The libs agent and interpreter agent are **builders**. The integration agent is 
 
 Per `docs/engineering/github-process.md`:
 
-**Libs agent** (libs/, tests/conformance/ infra, Makefile):
-- Branch: `agent/libs/main`
-- Features: `agent/libs/feat/step-N-<description>`
+**Shared agent** (libs/, tests/, examples/, Makefile):
+- Branch: `agent/shared/main`
+- Features: `agent/shared/feat/step-N-<description>`
 
 **Interpreter agent** (tools/interpreter/):
 - Branch: `agent/interpreter/main`
@@ -97,7 +97,7 @@ Per `docs/engineering/github-process.md`:
 - Does not create feature branches — works directly on `integration/main` for validation runs and merge decisions
 
 **Per-step workflow**:
-1. Libs agent and interpreter agent create feature branches for the step
+1. Shared agent and interpreter agent create feature branches for the step
 2. Implement and test locally
 3. Merge to agent's main branch
 4. Open PR to `integration/main`
@@ -110,11 +110,12 @@ Per `docs/engineering/github-process.md`:
 
 | Component | Owner | Location |
 |-----------|-------|----------|
-| nemlib (shared library) | Libs agent | `libs/nemlib/` |
+| nemlib (shared library) | Shared agent | `libs/nemlib/` |
 | Interpreter | Interpreter agent | `tools/interpreter/` |
-| Conformance test framework | Libs agent | `tests/conformance/runner.py`, `conftest.py`, `runners/` |
-| Conformance test cases | Libs agent (wiring), Integration agent (defines what to test) | `tests/conformance/` |
-| Infrastructure | Libs agent | Root `Makefile`, `pyproject.toml` files |
+| Conformance test framework | Shared agent | `tests/conformance/runner.py`, `conftest.py`, `runners/` |
+| Conformance test cases | Shared agent (wiring), Integration agent (defines what to test) | `tests/conformance/` |
+| Infrastructure | Shared agent | Root `Makefile`, `pyproject.toml` files |
+| Examples | Shared agent | `examples/` |
 | Plan documents | Integration agent | `plan/phase_1/` |
 | Spec and contracts | Integration agent | `spec/`, `docs/contracts/` |
 

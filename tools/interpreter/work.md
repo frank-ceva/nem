@@ -4,7 +4,7 @@ This file lists all major work items to be worked on, or currently being worked 
 
 **Plan reference:** `plan/phase_1/interpreter.md` Step 1, `plan/phase_1/master.md`
 
-Set up the interpreter package. No functional code yet — wait for nemlib parser to be available from the libs agent.
+Set up the interpreter package. No functional code yet — wait for nemlib parser to be available from the shared agent.
 
 ## Tasks
 
@@ -25,7 +25,7 @@ Set up the interpreter package. No functional code yet — wait for nemlib parse
 
 **Plan reference:** `plan/phase_1/interpreter.md` Step 2
 
-Build the memory subsystem. Depends on nemlib parser for buffer/region declarations (libs agent Step 2).
+Build the memory subsystem. Depends on nemlib parser for buffer/region declarations (shared agent Step 2).
 
 ## Modules
 
@@ -61,9 +61,9 @@ Summary:
 
 The following items were created before the Phase 1 plan existed. They are now addressed by specific steps in the plan:
 
-- **Consume opcode registry** → Phase 1 Step 5 (libs agent builds opcodes.py loader; interpreter uses it)
+- **Consume opcode registry** → Phase 1 Step 5 (shared agent builds opcodes.py loader; interpreter uses it)
 - **Extend device model and add new opcodes** → Phase 1 Steps 6-7
-- **Add const declaration support** → Phase 1 Step 1 (libs agent builds parser; interpreter benefits automatically via nemlib)
+- **Add const declaration support** → Phase 1 Step 1 (shared agent builds parser; interpreter benefits automatically via nemlib)
 - **Architecture spec** → status=completed (see interpreter_spec.md)
 
 ---

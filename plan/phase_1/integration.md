@@ -148,14 +148,14 @@ All of the following must be true:
 
 After each step:
 
-1. **Libs agent**: Opens PR from `agent/libs/main` to `integration/main`
+1. **Shared agent**: Opens PR from `agent/shared/main` to `integration/main`
 2. **Interpreter agent**: Opens PR from `agent/interpreter/main` to `integration/main`
-3. **Integration agent**: Merges libs PR first, then interpreter PR
+3. **Integration agent**: Merges shared PR first, then interpreter PR
 4. **Integration agent**: Runs `make test` to verify cross-component consistency
-5. **Integration agent**: Reports any failures back to the responsible builder agent (libs or interpreter)
+5. **Integration agent**: Reports any failures back to the responsible builder agent (shared or interpreter)
 
 At parallel track convergence (after Steps 5 + 6):
 1. Integration agent merges both tracks into `integration/main`
 2. Integration agent runs full test suite
 3. Integration agent verifies device-aware execution works
-4. Failures reported back to libs agent or interpreter agent as appropriate
+4. Failures reported back to shared agent or interpreter agent as appropriate

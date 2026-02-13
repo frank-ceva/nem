@@ -4,7 +4,7 @@ This file lists all major work items to be worked on, or currently being worked 
 
 **Plan reference:** `plan/phase_1/libs.md` Step 1, `plan/phase_1/master.md`
 
-Build the foundation: nemlib package, diagnostics, core types, lexer, parser for `const` declarations, and conformance test infrastructure.
+Build the foundation: nemlib package, diagnostics, core types, lexer, parser for `const` declarations, conformance test infrastructure, and build infrastructure.
 
 ## nemlib package setup
 
