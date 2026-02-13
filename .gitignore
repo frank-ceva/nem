@@ -29,6 +29,15 @@ models/*.gguf
 *.pdb
 *.bin.bin
 
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
 # Temporary files
 *.tmp
 *.log
