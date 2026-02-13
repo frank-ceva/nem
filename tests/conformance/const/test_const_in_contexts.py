@@ -18,7 +18,13 @@ CASES = [
 
 
 @pytest.mark.parametrize("description,source,expected", CASES, ids=[c[0] for c in CASES])
-def test_const_in_contexts(description, source, expected):
+def test_const_in_contexts(runner, description, source, expected):
     """Constants used in buffer sizes, region parameters, loop bounds, and shape dimensions."""
-    # Conformance specification — to be wired to parser/semantic checker
-    pass
+    result = runner.validate(source)
+    if expected == "valid":
+        assert result.valid, f"Expected valid but got errors: {result.diagnostics}"
+    else:
+        assert not result.valid, f"Expected error but got valid"
+        error_text = expected.removeprefix("error: ")
+        assert any(error_text.lower() in d.lower() for d in result.diagnostics), \
+            f"Expected '{error_text}' in diagnostics: {result.diagnostics}"

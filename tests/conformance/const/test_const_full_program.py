@@ -85,8 +85,7 @@ endloop
 """
 
 
-def test_full_program_with_const_preamble():
+def test_full_program_with_const_preamble(runner):
     """A complete NEM program using const declarations is valid."""
-    # Conformance specification — to be wired to parser/semantic checker
-    # Expected outcome: valid (no parse or semantic errors)
-    assert NEM_PROGRAM is not None  # placeholder assertion
+    result = runner.validate(NEM_PROGRAM)
+    assert result.valid, f"Expected valid but got errors: {result.diagnostics}"
