@@ -81,6 +81,8 @@ All tools share a pure-Python, zero-dependency design (`nemlib`). Shared interfa
 
 Browse the examples to see NEM in action:
 
+- [whitepaper.md](/spec/whitepaper.md) - Whitepaper describing the problem statement, high-level positioning and comparison
+- [npm_baseline_1.0](examples/npm_baseline_1.0) - NPM device definition
 - [conv2d_relu.nem](examples/conv2d_relu.nem) — Tiled Conv2D + ReLU with ping-pong buffers
 - [gemm_bias_relu.nem](examples/gemm_bias_relu.nem) — GEMM + Bias + ReLU for fully-connected layers
 - [conv2d_maxpool.nem](examples/conv2d_maxpool.nem) — Two-stage Conv2D + MaxPool pipeline

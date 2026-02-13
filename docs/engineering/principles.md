@@ -20,16 +20,19 @@ Simpler integration; requires strict internal boundaries.
 
 Decision:
 One dedicated agent per tool.
-One dedicated agent for spec and integration work.
+One dedicated agent for shared libraries and infrastructure (libs agent).
+One dedicated agent for spec evolution, integration validation, and coordination (integration agent).
 Each agent works on its own clone (or worktree) of the repository, on a dedicated branch.
 Each agent uses dedicated CLAUDE.md and work.md files to manage its work.
 All coordination happens through GitHub PRs — agents may run on the same machine, different machines, or different accounts.
 
+The libs agent builds shared code (nemlib, test infrastructure, build config). The integration agent validates cross-component consistency, runs tests, and reports failures — it does not write production code. This separation ensures the quality gate is independent of the code it validates.
+
 Rationale:
-Enables concurrent work with full isolation. Clone-based model supports distributed execution across machines and accounts. Worktrees are an optional local optimization when all agents run on the same machine.
+Enables concurrent work with full isolation. Separating code building from integration validation prevents the same agent from judging its own work. Clone-based model supports distributed execution across machines and accounts. Worktrees are an optional local optimization when all agents run on the same machine.
 
 Consequences:
-Requires discipline around branch merging and scope enforcement.
+Requires discipline around branch merging and scope enforcement. Three-way coordination (libs, tool, integration) adds overhead but improves quality assurance.
 
 ---
 
@@ -46,10 +49,10 @@ Separates implementation correctness from language correctness.
 ## 4. Contract Ownership
 
 Decision:
-Contracts and shared libraries are integration-owned.
+Contracts and spec are integration-owned. Shared libraries are libs-agent-owned. Both are protected from direct modification by tool agents.
 
 Rationale:
-Prevents drift between tools.
+Prevents drift between tools. The libs agent builds shared code under integration agent review; the integration agent owns spec/contracts and validates cross-component consistency.
 
 ---
 

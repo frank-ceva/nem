@@ -16,6 +16,9 @@ PRs replace any separate “integration queue” mechanism. A PR is the only val
 * `integration/main`
   Staging branch for validated PRs prior to promotion to `main`.
 
+* `agent/libs/main`
+  Long-lived branch owned by the libs agent (shared libraries, test infrastructure, build config).
+
 * `agent/<tool>/main`
   Long-lived branch owned by a specific tool agent (e.g., interpreter, compiler).
 
@@ -26,14 +29,15 @@ PRs replace any separate “integration queue” mechanism. A PR is the only val
 Feature work is developed on:
 
 ```
-agent/<tool>/feat/<feature-name>
+agent/<tool>/feat/<feature-name>    # tool agents
+agent/libs/feat/<feature-name>      # libs agent
 ```
 
 Flow:
 
-1. Develop feature on `agent/<tool>/feat/<feature-name>`.
-2. Merge into `agent/<tool>/main` once validated locally.
-3. Open PR from `agent/<tool>/main` → `integration/main`.
+1. Develop feature on `agent/<tool>/feat/<feature-name>` (or `agent/libs/feat/<feature-name>`).
+2. Merge into agent's main branch once validated locally.
+3. Open PR from agent's main branch → `integration/main`.
 
 No direct PRs from feature branches to `integration/main`.
 
@@ -133,19 +137,19 @@ Promotion may occur via PR or fast-forward, depending on branch protection rules
 
 ---
 
-## 8. Contract and Spec Changes
+## 8. Contract, Spec, and Shared Library Changes
 
 If a PR modifies:
 
-* `docs/contracts/**`
-* `spec/**`
-* `libs/**`
+* `docs/contracts/**` (integration-owned)
+* `spec/**` (integration-owned)
+* `libs/**` (libs-agent-owned)
 
 Then:
 
 * It must include explicit documentation of the change.
 * Version bump must be applied if breaking.
-* Integration review is mandatory.
+* Integration agent review is mandatory (even for libs-agent PRs).
 
 ---
 

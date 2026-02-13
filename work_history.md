@@ -297,6 +297,48 @@ Reviewed all NEM code across the project (standalone .nem files and embedded exa
 
 ---
 
+# Incremental NEM development plan
+status=completed
+
+Defined a detailed 8-step incremental development plan for Phase 1 of the NEM toolchain, covering nemlib (shared library), interpreter, conformance tests, and infrastructure. The "Common infrastructure" work item was folded into this plan as Step 1 builds nemlib as the shared foundation.
+
+## Summary
+
+### Plan structure (`plan/phase_1/`)
+- **master.md** — Overall 8-step plan with dependency graph, agent responsibilities (integration agent vs interpreter agent), git branch strategy, milestones, and explicitly deferred items
+- **libs.md** — nemlib shared library: 6-layer architecture (diagnostics → core → parser → device → types → validation), per-step module build plan, key interfaces (DiagnosticCollector, parse(), DeviceConfig, match_opcode_instance(), validate())
+- **interpreter.md** — Interpreter: per-step module build plan (memory model, execution engine, compute backend, device integration, validation wiring), package structure under neminterp/
+- **tests.md** — Two-tier tool-agnostic conformance test architecture with ConformanceRunner protocol enabling the same tests to run against both the interpreter and future compiler+binder+simulator pipeline
+- **infra.md** — Python packaging (pyproject.toml for nemlib and interpreter), Makefile targets, ruff + mypy configuration, opcode registry loading strategy
+- **integration.md** — Per-step completion criteria, Phase 1 definition of done (9 criteria), cross-component validation points, synchronization protocol
+
+### 8-step incremental plan
+1. Infrastructure + Lexer + Constants (program header, const declarations, integer expressions)
+2. Storage Declarations + Memory Model (buffers, regions, decorators syntax-only)
+3. Data Movement + Execution Engine (transfer, store, wait, token assignments, deps)
+4. Loops + Pipelining (loop/endloop, @max_in_flight, runtime expressions)
+5. Compute Operations (all compute task syntax, elementwise ops, gemm, conv2d)
+6. Device Configuration + Registry (device config grammar, inheritance, include, resolver) — parallel with Steps 3-5
+7. Remaining Opcodes + Type Extensions (pooling, norm, softmax, layout, cast, quantize, INT4)
+8. Semantic Analysis + Decorators (10 validation passes, type family matching, decorator enforcement)
+
+### Key design decisions
+- **Libs-first strategy**: nemlib built before interpreter, providing shared parsing/validation/device model
+- **Common infrastructure folded in**: The separate "Common infrastructure" work item was subsumed — nemlib IS the common infrastructure
+- **Tool-agnostic conformance**: ConformanceRunner protocol with validate() and execute() methods, parametrized pytest fixture runs all tests against all available backends
+- **Two-tier testing**: Validation tier (accept/reject NEM source) + Execution tier (input → output with .npy fixtures)
+- **Parallel tracks**: Steps 3-5 (execution) and Step 6 (device config) can proceed independently, converging at Step 7
+- **~8 steps**: Each step adds specific language constructs, building from minimal parseable programs to full language coverage
+
+---
+
+# Common infrastructure
+status=completed
+
+Folded into the "Incremental NEM development plan" work item above. The common infrastructure is nemlib (`libs/nemlib/`), a 6-layer shared Python library providing diagnostics, core types, parser, device model, type system, and validation pipeline. All tools import from nemlib rather than duplicating parsing or validation logic. See `plan/phase_1/libs.md` for the detailed build plan.
+
+---
+
 # Extend NEM device model for full NPM architectural coverage
 status=completed
 

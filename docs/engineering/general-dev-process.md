@@ -8,20 +8,26 @@ This document defines the overall engineering model of the repository and clarif
 
 ### A. Project-Wide Engineering
 
-Scope:
+Project-wide work affects multiple tools or defines shared behavior. It is split across two agents:
 
-* Language semantics
-* Spec evolution
-* Cross-tool integration
+**Spec, contracts, and integration validation** (owned by Integration agent):
+
+* Language semantics and spec evolution
 * Contracts (IR, object format, CLI, diagnostics)
-* Conformance structure
+* Cross-tool integration validation (running tests, verifying consistency)
 * Release coordination
+* Merge decisions for `integration/main`
 
-Owned by:
+The integration agent does not write production code. It validates, coordinates, and reports failures.
 
-* Integration agent
+**Shared libraries and infrastructure** (owned by Libs agent):
 
-Project-wide work affects multiple tools or defines shared behavior.
+* Shared library development (`libs/nemlib/`)
+* Test infrastructure (conformance runner framework, fixtures)
+* Build infrastructure (`Makefile`, `pyproject.toml` files)
+* Conformance test implementation (wiring test stubs to runner calls)
+
+The libs agent builds shared code, subject to integration agent review.
 
 ---
 
@@ -81,22 +87,40 @@ Agents work in isolated clones (or worktrees). The following protocol ensures co
 
 ### Tool Agent → Integration Agent
 
-When a tool agent needs a change to integration-owned areas (contracts, spec, libs):
+When a tool agent needs a change to integration-owned areas (contracts, spec):
 
 1. Fill out a Contract Change Proposal using `docs/workflow/templates/proposal-contract-change.md`.
 2. Add a work item entry to `spec-int-work.md` referencing the proposal.
 3. Continue working on non-blocked tasks.
 
-### Integration Agent → Tool Agents
+### Tool Agent → Libs Agent
 
-When a spec or contract change requires tool updates:
+When a tool agent needs a change to shared libraries (`libs/`):
 
-1. The integration agent adds a work item to `tools/<tool>/work.md` for each affected tool.
+1. Fill out a Contract Change Proposal using `docs/workflow/templates/proposal-contract-change.md`.
+2. Add a work item entry to `libs/nemlib/work.md` (or `spec-int-work.md` if the change also affects spec).
+3. Continue working on non-blocked tasks.
+
+### Integration Agent → Tool Agents / Libs Agent
+
+When a spec or contract change requires updates:
+
+1. The integration agent adds a work item to the relevant `work.md`:
+   * `tools/<tool>/work.md` for tool-specific changes
+   * `libs/nemlib/work.md` for shared library changes
 2. The work item must include:
    * Summary of the change.
    * Reference to `spec/CHANGELOG.md` entry.
    * Affected contracts or spec sections.
    * Conformance tests to validate against.
+
+### Integration Agent → Failure Reports
+
+When cross-component validation fails:
+
+1. The integration agent identifies the responsible builder agent (libs or tool).
+2. Adds a work item to the responsible agent's `work.md` describing the failure.
+3. Blocks the PR until the failure is resolved.
 
 ### Session Start Protocol
 
@@ -104,11 +128,12 @@ Each agent must, at the start of every work session:
 
 1. Read its own `work.md` for new items added by the integration agent.
 2. Tool agents: check `spec/CHANGELOG.md` for spec updates since last session.
-3. Integration agent: scan `spec-int-work.md` for new proposals from tool agents.
+3. Libs agent: check `spec/CHANGELOG.md` and `spec-int-work.md` for spec changes affecting shared code.
+4. Integration agent: scan `spec-int-work.md` for new proposals from tool or libs agents.
 
 ### Conformance Test Coordination
 
-All tool agents may add tests to `tests/conformance/**`. To avoid merge conflicts:
+The libs agent owns the conformance test framework (`tests/conformance/runner.py`, `conftest.py`, `runners/`). Tool agents may add tests to `tests/conformance/**`. To avoid merge conflicts:
 
 * Use tool-namespaced subdirectories when adding tests for tool-specific validation (e.g., `tests/conformance/interpreter/`, `tests/conformance/compiler/`).
 * Shared behavioral tests go in feature-area directories (e.g., `tests/conformance/memory/`).
