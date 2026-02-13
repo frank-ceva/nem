@@ -4,6 +4,105 @@ Completed work items are recorded here.
 
 ---
 
+# Phase 1, Step 2: Storage Declarations + Memory Model
+status=completed
+
+Extended the parser to handle buffer declarations, region declarations (let bindings), type attributes, quantization descriptors, and decorators (syntax only).
+
+## Summary
+
+### core/decorators.py (new file)
+- `DecoratorKind` enum with 9 members: MATERIALIZED, DETERMINISTIC, MEMMOVE, READONLY, WRITEONLY, MAX_IN_FLIGHT, RESOURCE, DEBUG, PROFILE
+- `from_name()` classmethod for source-level name lookup
+
+### parser/ast_nodes.py extensions
+- `StringLiteral(ExprNode)` — string literal in value positions
+- `ArrayLiteral(ExprNode)` — array literal `[val, val, ...]`
+- `PerTensorQuantNode`, `PerChannelQuantNode`, `PerGroupQuantNode` — quant descriptor variants
+- `QuantDescNode` — Union type of the three quant forms
+- `TypeAttrsNode` — elem, shape, layout, strides, quant
+- `DecoratorNode` — `@name` or `@name(args)`
+- `BufferDeclNode` — `buffer NAME : level (size=expr, align=INT) @decos`
+- `RegionDeclNode` — `let NAME = region(buf, off, ext) type_attrs @decos`
+- `LetDeclNode` — `let NAME = value` (non-region)
+- `StmtNode` union updated to include all statement types
+- `ProgramNode.statements` updated from `tuple[ConstDeclNode, ...]` to `tuple[StmtNode, ...]`
+
+### parser/parser.py extensions
+- `_peek_past_newlines()` — continuation line detection for type_attrs and decorators
+- `parse_buffer_decl()` — buffer with DDR/L2/L1/L1[expr] memory level, size/align props, decorators
+- `parse_let_decl()` — dispatches to region or simple let
+- `_parse_region_body()` — region(buf, offset, extent) with optional type_attrs and decorators
+- `_try_parse_type_attrs()` / `_parse_type_attrs()` — elem=, shape=[], layout= or strides=[], optional quant=
+- `_parse_quant_desc()` — per_tensor, per_channel, per_group
+- `_parse_decorators()` / `_parse_decorator()` — zero or more decorators looking past newlines
+- `_parse_deco_args()` — handles value lists and @resource(unit_type[expr]) syntax
+- `_parse_value()` — expr, STRING, [array]
+- Updated `_parse_body()` to handle BUFFER and LET tokens
+
+### Tests
+- `tests/test_parser_storage.py` — 71 new tests covering:
+  - Buffer declarations (13 tests): DDR/L2/L1, L1[expr], size/align props, decorators
+  - Let declarations (8 tests): int, float, expression, string, array, nested array, trailing comma
+  - Region declarations (6 tests): basic, with type_attrs, with decorators, combined
+  - Type attributes (5 tests): layout, strides, all 13 elem types, expression shapes, minimal
+  - Quantization descriptors (3 tests): per_tensor, per_channel, per_group
+  - Decorators (6 tests): simple, with args, multiple, continuation lines
+  - Value parsing (7 tests): strings, arrays, nested, deeply nested, mixed
+  - Mixed programs (4 tests): const+buffer, buffer+region, all types, full program with headers
+  - Multi-line continuation (4 tests): type_attrs, decorators, both, multiple
+  - Error cases (12 tests): missing colon, invalid mem level, missing paren, invalid elem type, etc.
+  - Integration (2 tests): realistic matmul program, quantized conv program
+- Updated 3 Step 1 tests that used buffer/let as "unknown" statements — replaced with truly unknown opcodes (store, emit)
+- Total: 247 unit tests pass, ruff check zero violations, ruff format zero reformats, mypy zero errors
+
+---
+
+# Phase 1, Step 1: Infrastructure + Lexer + Constants
+status=completed
+
+Built the nemlib foundation: package setup, diagnostics (Layer 0), core types (Layer 1), full lexer and parser for const declarations (Layer 2), conformance test infrastructure, and build infrastructure.
+
+## Summary
+
+### Package & Infrastructure
+- `pyproject.toml` (Python 3.10+, zero runtime deps), `__init__.py`, `py.typed`, root `Makefile`
+- Virtual environment requires Python 3.10+ via `uv venv`
+
+### Diagnostics (Layer 0)
+- `SourceLocation`, `DiagnosticSeverity`, `Diagnostic`, `DiagnosticCollector` — all frozen dataclasses
+
+### Core (Layer 1)
+- `ElementType` (13 types with `bitwidth()`, `is_integer()`, `is_float()`)
+- `MemoryLevel` enum (DDR, L2, L1)
+- Expression AST nodes (IntLiteral, FloatLiteral, Identifier, BinaryOp, UnaryOp, ParenExpr)
+- `evaluate_const_expr()` with variable environment
+
+### Parser (Layer 2)
+- Full `TokenKind` enum (106 token types including `LANGLE`/`RANGLE` for device config)
+- Complete lexer handling comments, all literals, compound keywords, angle brackets
+- `ProgramNode`, `ConstDeclNode` AST nodes
+- Recursive-descent parser: program header, const declarations, expressions with precedence
+- Error recovery (skip to newline on parse error)
+
+### Conformance Test Infrastructure
+- `ConformanceRunner` protocol, `ValidationResult`, `InterpreterRunner`
+- Parametrized pytest fixture runs all tests against all available runners
+- 32 const conformance cases + 63 other conformance tests (registry, device_config, opcodes, types)
+
+### Tests
+- 176 nemlib unit tests (diagnostics, elements, expressions, lexer, parser)
+- 95 conformance tests pass, 1 skipped (schema validation needs jsonschema)
+- `ruff check` zero violations, `ruff format` zero reformats, `mypy` zero errors (strict)
+
+### Crash Recovery Fixes
+- Fixed line-too-long in `expressions.py`, unused import in `parser.py`
+- Added `LANGLE`/`RANGLE` tokens (lexer failed on device config `<`/`>` syntax)
+- Ran `ruff format` on 6 files
+- Recreated polluted `.venv` with `uv venv --python 3.10 --clear`
+
+---
+
 # Extract opcode definitions into a machine-readable registry
 status=completed
 
