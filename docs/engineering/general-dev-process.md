@@ -22,7 +22,7 @@ The integration agent does not write production code. It validates, coordinates,
 
 **Shared libraries and infrastructure** (owned by Shared agent):
 
-* Shared library development (`libs/nemlib/`)
+* Shared library development (`libs/nemlib-py/`)
 * Test infrastructure (conformance runner framework, fixtures)
 * Build infrastructure (`Makefile`, `pyproject.toml` files)
 * Conformance test implementation (wiring test stubs to runner calls)

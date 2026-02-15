@@ -8,9 +8,9 @@ Build the foundation: nemlib package, diagnostics, core types, lexer, parser for
 
 ## nemlib package setup
 
-- `libs/nemlib/pyproject.toml` — Python 3.10+, zero runtime deps, dev deps (pytest, mypy, ruff, pyyaml)
-- `libs/nemlib/nemlib/__init__.py` — version, top-level re-exports
-- `libs/nemlib/nemlib/py.typed` — PEP 561 marker
+- `libs/nemlib-py/pyproject.toml` — Python 3.10+, zero runtime deps, dev deps (pytest, mypy, ruff, pyyaml)
+- `libs/nemlib-py/nemlib/__init__.py` — version, top-level re-exports
+- `libs/nemlib-py/nemlib/py.typed` — PEP 561 marker
 
 ## Diagnostics (Layer 0)
 
@@ -47,11 +47,11 @@ Build the foundation: nemlib package, diagnostics, core types, lexer, parser for
 
 ## Unit tests
 
-- `libs/nemlib/tests/test_diagnostics.py`
-- `libs/nemlib/tests/test_elements.py`
-- `libs/nemlib/tests/test_expressions.py`
-- `libs/nemlib/tests/test_lexer.py`
-- `libs/nemlib/tests/test_parser_const.py`
+- `libs/nemlib-py/tests/test_diagnostics.py`
+- `libs/nemlib-py/tests/test_elements.py`
+- `libs/nemlib-py/tests/test_expressions.py`
+- `libs/nemlib-py/tests/test_lexer.py`
+- `libs/nemlib-py/tests/test_parser_const.py`
 
 ## Completion criteria
 

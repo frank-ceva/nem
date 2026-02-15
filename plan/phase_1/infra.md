@@ -6,7 +6,7 @@ Infrastructure setup happens in Step 1 and provides the foundation for all subse
 
 ## Python Packaging
 
-### nemlib (libs/nemlib/pyproject.toml)
+### nemlib (libs/nemlib-py/pyproject.toml)
 
 ```toml
 [build-system]
@@ -92,7 +92,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 Both packages installed in editable mode from the repo root:
 
 ```bash
-pip install -e libs/nemlib[dev]
+pip install -e libs/nemlib-py[dev]
 pip install -e tools/interpreter[dev]
 ```
 
@@ -104,13 +104,13 @@ Top-level Makefile at repo root:
 .PHONY: install test test-nemlib test-interpreter test-conformance lint typecheck clean
 
 install:
-	pip install -e libs/nemlib[dev]
+	pip install -e libs/nemlib-py[dev]
 	pip install -e tools/interpreter[dev]
 
 test: test-nemlib test-interpreter test-conformance
 
 test-nemlib:
-	pytest libs/nemlib/tests/ -v
+	pytest libs/nemlib-py/tests/ -v
 
 test-interpreter:
 	pytest tools/interpreter/tests/ -v
@@ -125,11 +125,11 @@ test-conformance-execution:
 	pytest tests/conformance/execution/ -v
 
 lint:
-	ruff check libs/nemlib/ tools/interpreter/ tests/
-	ruff format --check libs/nemlib/ tools/interpreter/ tests/
+	ruff check libs/nemlib-py/ tools/interpreter/ tests/
+	ruff format --check libs/nemlib-py/ tools/interpreter/ tests/
 
 typecheck:
-	mypy libs/nemlib/nemlib/
+	mypy libs/nemlib-py/nemlib/
 	mypy tools/interpreter/neminterp/
 
 clean:
@@ -151,9 +151,9 @@ Deferred to when GitHub Actions are set up. The Makefile targets serve as CI ste
 
 ```
 libs/
-  nemlib/
+  nemlib-py/
     pyproject.toml
-    nemlib/                     # Source package
+    nemlib/                     # Source package (Python, Phase 1)
     tests/                      # nemlib unit tests
 
 tools/

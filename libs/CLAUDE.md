@@ -17,6 +17,16 @@ You MUST NOT modify:
 
 You MUST comply with guidelines defined in @work_instructions.md and also enforce engineering process defined in the engineering directory, using @docs/engineering/README.md as an entry point.
 
+## Multi-Language Strategy (ADR-007)
+
+nemlib has a phased dual-implementation strategy:
+
+- **Phase 1** (current): Build `libs/nemlib-py/` — pure Python 3.10+, zero runtime dependencies.
+- **Phase 2** (compiler/binder start): Build `libs/nemlib-cpp/` — C++ implementation using Python as reference. Both coexist; differential conformance tests validate agreement.
+- **Phase 3** (grammar stabilizes): `nemlib-cpp` becomes the sole implementation. `nemlib-py` is archived.
+
+During Phase 1, all work is in `libs/nemlib-py/`. The C++ implementation is Phase 2 scope.
+
 ## Development Plan
 
 Follow the Phase 1 incremental plan in `plan/phase_1/`:
