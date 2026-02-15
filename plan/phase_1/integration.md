@@ -10,7 +10,7 @@ This document defines how to validate cross-component consistency at each step a
 
 | Criterion | Verification |
 |-----------|-------------|
-| nemlib installs | `pip install -e libs/nemlib[dev]` succeeds |
+| nemlib installs | `pip install -e libs/nemlib-py[dev]` succeeds |
 | Interpreter installs | `pip install -e tools/interpreter[dev]` succeeds |
 | Lexer tokenizes all examples | Unit test: lex each .nem file, no errors |
 | Const parser works | Unit test: parse const blocks from all 5 examples |
