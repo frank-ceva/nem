@@ -194,7 +194,7 @@ tools/interpreter/
 
 ```
 neminterp runtime dependencies:
-  nemlib (path: ../../libs/nemlib)
+  nemlib (path: ../../libs/nemlib-py)
   numpy >= 1.24
   scipy >= 1.10  (for conv2d reference)
 

@@ -2,14 +2,14 @@
 
 # Install nemlib in editable mode with dev dependencies
 install:
-	pip install -e libs/nemlib[dev]
+	pip install -e libs/nemlib-py[dev]
 
 # Run all tests
 test: test-nemlib test-conformance
 
 # Run nemlib unit tests only
 test-nemlib:
-	python -m pytest libs/nemlib/tests/ -v
+	python -m pytest libs/nemlib-py/tests/ -v
 
 # Run interpreter tests (placeholder — will be added later)
 test-interpreter:
@@ -21,12 +21,12 @@ test-conformance:
 
 # Run ruff linter on nemlib
 lint:
-	ruff check libs/nemlib/nemlib/
-	ruff format --check libs/nemlib/nemlib/
+	ruff check libs/nemlib-py/nemlib/
+	ruff format --check libs/nemlib-py/nemlib/
 
 # Run mypy type checking on nemlib
 typecheck:
-	mypy libs/nemlib/nemlib/
+	mypy libs/nemlib-py/nemlib/
 
 # Clean build artifacts and caches
 clean:
