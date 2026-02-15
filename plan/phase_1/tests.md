@@ -55,10 +55,25 @@ tests/conformance/
   runner.py                         # Protocol + result types
   runners/
     __init__.py
-    interpreter_runner.py           # Uses nemlib + neminterp
+    interpreter_runner.py           # Uses nemlib-py + neminterp
+    nemlib_py_runner.py             # Uses nemlib-py directly (Phase 2, validate only)
+    nemlib_cpp_runner.py            # Uses nemlib_native C++ pybind11 (Phase 2, validate only)
     pipeline_runner.py              # Uses compiler + binder + simulator (future)
   conftest.py                       # Pytest fixture: parametrize by runner
 ```
+
+### Runner Capability Model
+
+Runners declare which operations they support. Library-level runners (nemlib-py, nemlib-cpp) only support validation — they test the shared library directly without a full tool. Tool-level runners (interpreter, pipeline) support both validation and execution.
+
+| Runner | validate | execute | When available |
+|--------|:--------:|:-------:|----------------|
+| nemlib-py | Yes | No | Phase 2+ |
+| nemlib-cpp | Yes | No | Phase 2+ |
+| interpreter | Yes | Yes | Phase 1+ |
+| pipeline | Yes | Yes | Future |
+
+Validation-tier tests parametrize over `validation_runner` (all runners). Execution-tier tests parametrize over `execution_runner` (tool runners only).
 
 **InterpreterRunner** (Phase 1):
 ```python
@@ -66,6 +81,7 @@ tests/conformance/
 
 class InterpreterRunner:
     name = "interpreter"
+    capabilities = {"validate", "execute"}
 
     def validate(self, source, device_config=None):
         diag = DiagnosticCollector()
@@ -82,10 +98,47 @@ class InterpreterRunner:
         return ExecutionResult(outputs=outputs)
 ```
 
-**PipelineRunner** (future, Phase 2+):
+**NemLibPyRunner** (Phase 2 — library-level, validate only):
+```python
+# tests/conformance/runners/nemlib_py_runner.py
+
+class NemLibPyRunner:
+    name = "nemlib-py"
+    capabilities = {"validate"}
+
+    def validate(self, source, device_config=None):
+        from nemlib import parse, validate, DiagnosticCollector
+        diag = DiagnosticCollector()
+        ast = parse(source, diag)
+        if not diag.has_errors():
+            validate(ast, device, diag)
+        return ValidationResult(valid=not diag.has_errors(),
+                                diagnostics=[d.message for d in diag.get_all()])
+```
+
+**NemLibCppRunner** (Phase 2 — library-level, validate only):
+```python
+# tests/conformance/runners/nemlib_cpp_runner.py
+
+class NemLibCppRunner:
+    name = "nemlib-cpp"
+    capabilities = {"validate"}
+
+    def validate(self, source, device_config=None):
+        import nemlib_native as nemlib   # C++ pybind11 bindings
+        diag = nemlib.DiagnosticCollector()
+        ast = nemlib.parse(source, diag)
+        if not diag.has_errors():
+            nemlib.validate(ast, device, diag)
+        return ValidationResult(valid=not diag.has_errors(),
+                                diagnostics=[d.message for d in diag.get_all()])
+```
+
+**PipelineRunner** (future):
 ```python
 class PipelineRunner:
     name = "pipeline"
+    capabilities = {"validate", "execute"}
 
     def validate(self, source, device_config=None):
         # compiler validates during lowering
@@ -98,7 +151,7 @@ class PipelineRunner:
         return ExecutionResult(outputs=outputs)
 ```
 
-### Pytest Fixture
+### Pytest Fixtures
 
 ```python
 # tests/conformance/conftest.py
@@ -107,17 +160,52 @@ from tests.conformance.runners.interpreter_runner import InterpreterRunner
 
 def get_available_runners():
     runners = [InterpreterRunner()]
-    try:
-        from tests.conformance.runners.pipeline_runner import PipelineRunner
-        runners.append(PipelineRunner())
-    except ImportError:
-        pass
+    for runner_cls, module_name in [
+        ("NemLibPyRunner", "tests.conformance.runners.nemlib_py_runner"),
+        ("NemLibCppRunner", "tests.conformance.runners.nemlib_cpp_runner"),
+        ("PipelineRunner", "tests.conformance.runners.pipeline_runner"),
+    ]:
+        try:
+            mod = __import__(module_name, fromlist=[runner_cls])
+            runners.append(getattr(mod, runner_cls)())
+        except (ImportError, AttributeError):
+            pass
     return runners
 
+def get_validation_runners():
+    return [r for r in get_available_runners() if "validate" in r.capabilities]
+
+def get_execution_runners():
+    return [r for r in get_available_runners() if "execute" in r.capabilities]
+
+@pytest.fixture(params=get_validation_runners(), ids=lambda r: r.name)
+def validation_runner(request):
+    """All runners that support validate() — includes library-level runners."""
+    return request.param
+
+@pytest.fixture(params=get_execution_runners(), ids=lambda r: r.name)
+def execution_runner(request):
+    """Only runners that support execute() — tool-level runners."""
+    return request.param
+
+# Backward-compatible alias
 @pytest.fixture(params=get_available_runners(), ids=lambda r: r.name)
 def runner(request):
     return request.param
 ```
+
+### Cross-Implementation Comparison Tests (Phase 2)
+
+When both nemlib implementations are available, additional tests compare their behavior directly:
+
+```
+tests/conformance/cross_impl/
+    test_ast_agreement.py           # Parse same programs, compare AST JSON
+    test_diagnostic_agreement.py    # Validate same invalid programs, compare diagnostics
+    programs/                       # Test corpus of valid + invalid NEM programs
+```
+
+These tests parse each program with both `NemLibPyRunner` and `NemLibCppRunner`, then assert structural equivalence. Differences indicate bugs in one implementation. CI must gate on cross-implementation agreement during Phase 2.
 
 ## Directory Structure
 
@@ -129,6 +217,12 @@ tests/
     runners/
       __init__.py
       interpreter_runner.py
+      nemlib_py_runner.py           # Phase 2: nemlib-py direct (validate only)
+      nemlib_cpp_runner.py          # Phase 2: nemlib-cpp pybind11 (validate only)
+    cross_impl/                     # Phase 2: cross-implementation comparison
+      test_ast_agreement.py
+      test_diagnostic_agreement.py
+      programs/                     # Test corpus (valid + invalid NEM programs)
     const/                          # Validation tier (existing, 10 files, 32 cases)
       test_basic_const.py
       test_derived_const.py

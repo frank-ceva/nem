@@ -2,14 +2,14 @@
 
 ## Overview
 
-`nemlib` is the shared Python library in `libs/nemlib/` used by all NEM tools. It provides parsing, type system, device model, and validation — everything except tool-specific execution logic.
+`nemlib` is the shared Python library in `libs/nemlib-py/` used by all NEM tools. It provides parsing, type system, device model, and validation — everything except tool-specific execution logic.
 
 Architecture is defined in `docs/architecture/common-infrastructure.md`. This plan aligns with that document.
 
 ## Package Structure
 
 ```
-libs/nemlib/
+libs/nemlib-py/
   pyproject.toml              # Python 3.10+, zero runtime deps
   nemlib/
     __init__.py               # Version, top-level re-exports
@@ -241,10 +241,10 @@ nemlib dev dependencies: pytest >= 7.0, mypy, ruff
 
 ## Testing
 
-Each layer has unit tests under `libs/nemlib/tests/`:
+Each layer has unit tests under `libs/nemlib-py/tests/`:
 
 ```
-libs/nemlib/tests/
+libs/nemlib-py/tests/
   test_diagnostics.py
   test_elements.py
   test_expressions.py

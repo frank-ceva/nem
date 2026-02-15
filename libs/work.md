@@ -21,7 +21,7 @@ Extend the parser to handle task statements (transfer, store, wait), token assig
 
 ## Unit tests
 
-- `libs/nemlib/tests/test_parser_task.py` — task, wait, deps, operands, inline regions
+- `libs/nemlib-py/tests/test_parser_task.py` — task, wait, deps, operands, inline regions
 
 ## Completion criteria
 

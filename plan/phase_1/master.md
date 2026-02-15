@@ -8,7 +8,7 @@ Build a working NEM interpreter with shared library infrastructure, progressing 
 
 | In Scope | Out of Scope |
 |----------|-------------|
-| nemlib shared library (libs/nemlib/) | Compiler, Binder, Simulator |
+| nemlib shared library (libs/nemlib-py/) | Compiler, Binder, Simulator |
 | Interpreter (tools/interpreter/) | Timed execution mode |
 | Conformance tests (tests/conformance/) | NpmPyTorchApi bit-true compute |
 | Infrastructure (Makefile, pyproject.toml, CI) | Jupyter/notebook support |
@@ -110,7 +110,7 @@ Per `docs/engineering/github-process.md`:
 
 | Component | Owner | Location |
 |-----------|-------|----------|
-| nemlib (shared library) | Shared agent | `libs/nemlib/` |
+| nemlib (shared library) | Shared agent | `libs/nemlib-py/` |
 | Interpreter | Interpreter agent | `tools/interpreter/` |
 | Conformance test framework | Shared agent | `tests/conformance/runner.py`, `conftest.py`, `runners/` |
 | Conformance test cases | Shared agent (wiring), Integration agent (defines what to test) | `tests/conformance/` |

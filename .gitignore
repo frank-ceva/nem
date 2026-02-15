@@ -1,5 +1,6 @@
-# Claude Code local settings
-.claude/
+# Claude Code local settings (rules are tracked; local config is not)
+.claude/settings.local.json
+.claude/README.md
 .omc/
 
 # Build directories
