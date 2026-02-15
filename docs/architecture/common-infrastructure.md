@@ -62,12 +62,14 @@ These are tool-specific and belong in each tool's own codebase:
 
 ### 3.1 Single Shared Package: `nemlib`
 
-All shared infrastructure lives in a single Python package `libs/nemlib/` organized into layered submodules. A single package avoids the overhead of managing multiple independent packages while maintaining clear internal boundaries through the layer system.
+All shared infrastructure lives in a single package `nemlib` organized into layered submodules. A single package avoids the overhead of managing multiple independent packages while maintaining clear internal boundaries through the layer system.
 
-### 3.2 Package Structure
+The package has two implementations (see ADR-007): `libs/nemlib-py/` (Python, Phase 1) and `libs/nemlib-cpp/` (C++, Phase 2+). Both follow the same layered structure. The Python package structure is shown below; the C++ structure mirrors it with `.hpp`/`.cpp` files.
+
+### 3.2 Package Structure (Python — `libs/nemlib-py/`)
 
 ```
-libs/nemlib/
+libs/nemlib-py/
     pyproject.toml              # Package metadata, dependencies
     nemlib/
         __init__.py             # Version, top-level re-exports
@@ -170,11 +172,17 @@ The Binder and Simulator do not parse NEM source text (they consume IR/object fo
 
 **Rationale**: The layers have tight conceptual coupling (parser produces AST nodes defined in core, device model uses parser, etc.). Separate packages would create version coordination overhead with no practical benefit — all tools pin to the same monorepo revision anyway.
 
-### 4.2 Python as the Implementation Language
+### 4.2 Implementation Language Strategy
 
-**Decision**: Python 3.10+, with type annotations throughout.
+**Decision**: Phased dual-implementation approach — Python first, C++ later, converge to C++. See ADR-007 for full rationale.
 
-**Rationale**: The interpreter (the most-specified tool) is Python. Using Python for shared infrastructure ensures all tools can import it natively. If a tool is later implemented in another language, the shared library can serve as a reference implementation.
+**Phase 1** (current): `libs/nemlib-py/` — Pure Python 3.10+ with type annotations throughout. Fast iteration during spec exploration. The interpreter consumes it natively.
+
+**Phase 2** (compiler/binder start): `libs/nemlib-cpp/` — C++ implementation added alongside the Python version. The compiler (C++, MLIR-based) consumes `nemlib-cpp` directly. The binder (Rust) consumes via FFI. The interpreter continues using `nemlib-py`. Conformance tests run against both implementations for differential bug detection.
+
+**Phase 3** (grammar stabilizes): `nemlib-cpp` becomes the sole implementation. The interpreter switches to pybind11-wrapped C++ nemlib. `nemlib-py` is archived.
+
+**Rationale**: The compiler requires C++ for MLIR integration. The binder is Rust. A Python-only nemlib forces these tools to reimplement shared logic independently, creating drift risk. Starting with Python captures fast-iteration benefits during spec exploration. Adding C++ when tools need it avoids premature complexity. Converging to one implementation eliminates long-term dual maintenance.
 
 ### 4.3 Parser Scope: Programs AND Device Configs
 

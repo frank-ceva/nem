@@ -41,5 +41,6 @@ What becomes easier or harder as a result?
 | 004 | Contract ownership (integration-owned) | Accepted |
 | 005 | Three-layer Claude Code scoping | Accepted |
 | 006 | Lockstep releases | Accepted |
+| 007 | Multi-language strategy for shared infrastructure | Accepted |
 
 The six founding decisions are documented in `docs/engineering/principles.md`. Future decisions should be recorded as individual ADR files here.
